@@ -1,6 +1,6 @@
-// People: pedestrians who walk the sidewalks (and run when scared) and the player's own
-// low-poly character. Every person is boxes: legs and arms that swing with the walk cycle,
-// a jacket body, a head. No model files.
+// People: pedestrians who walk the sidewalks (and run when scared) and the player's
+// own low-poly character. Every person is boxes: legs and arms that swing with the
+// walk cycle, a jacket body, a head. No model files.
 import * as THREE from 'three';
 import { PEDS } from './config.js';
 
@@ -49,14 +49,19 @@ export function animateWalk(parts, phase, amount) {
   parts.armR.rotation.x = s * 0.8;
 }
 
+function randomOutfit(rng) {
+  return {
+    jacket: JACKETS[Math.floor(rng.next() * JACKETS.length)],
+    pants: PANTS[Math.floor(rng.next() * PANTS.length)],
+    skin: SKIN[Math.floor(rng.next() * SKIN.length)],
+    scale: rng.range(0.92, 1.05),
+  };
+}
+
 export function createPedestrian(scene, city, rng) {
   const spot = city.sidewalkPoint();
-  const { group, parts } = createPersonMesh(
-    JACKETS[Math.floor(rng.next() * JACKETS.length)],
-    PANTS[Math.floor(rng.next() * PANTS.length)],
-    SKIN[Math.floor(rng.next() * SKIN.length)],
-    rng.range(0.92, 1.05),
-  );
+  const outfit = randomOutfit(rng);
+  const { group, parts } = createPersonMesh(outfit.jacket, outfit.pants, outfit.skin, outfit.scale);
   scene.add(group);
   const ped = {
     group,
@@ -87,8 +92,7 @@ export function stepPedestrian(ped, dt, city, threat) {
   if (threat) {
     const dx = ped.x - threat.x;
     const dz = ped.z - threat.z;
-    const d = Math.hypot(dx, dz);
-    if (d < 30) {
+    if (Math.hypot(dx, dz) < 30) {
       ped.state = 'flee';
       ped.fleeTimer = 3;
       ped.fleeFrom = { x: threat.x, z: threat.z };
@@ -102,26 +106,24 @@ export function stepPedestrian(ped, dt, city, threat) {
     const d = Math.hypot(dx, dz) || 1;
     ped.heading = Math.atan2(dx / d, dz / d);
     ped.speed = PEDS.runSpeed;
-    ped.x += Math.sin(ped.heading) * ped.speed * dt;
-    ped.z += Math.cos(ped.heading) * ped.speed * dt;
-    const fixed = city.collideCircle(ped.x, ped.z, 0.6);
-    ped.x = fixed.x;
-    ped.z = fixed.z;
   } else {
     const dx = ped.target.x - ped.x;
     const dz = ped.target.z - ped.z;
     const d = Math.hypot(dx, dz);
     if (d < 1.5) {
       ped.target = city.sidewalkPoint();
+      ped.speed = 0;
     } else {
       ped.heading = Math.atan2(dx / d, dz / d);
       ped.speed = PEDS.walkSpeed;
-      ped.x += Math.sin(ped.heading) * ped.speed * dt;
-      ped.z += Math.cos(ped.heading) * ped.speed * dt;
-      const fixed = city.collideCircle(ped.x, ped.z, 0.6);
-      ped.x = fixed.x;
-      ped.z = fixed.z;
     }
+  }
+  if (ped.speed > 0) {
+    ped.x += Math.sin(ped.heading) * ped.speed * dt;
+    ped.z += Math.cos(ped.heading) * ped.speed * dt;
+    const fixed = city.collideCircle(ped.x, ped.z, 0.6);
+    ped.x = fixed.x;
+    ped.z = fixed.z;
   }
   ped.phase += ped.speed * dt * 1.6;
   animateWalk(ped.parts, ped.phase, Math.min(1, ped.speed / PEDS.walkSpeed) * 0.6);

@@ -1,13 +1,14 @@
-// The deterministic screenshot scenes behind ?shot=start|play|chase|end. Each one plays the
-// real rules forward from a fresh world for a fixed number of steps, steered by a simple
-// autopilot, so the frame is what a short game really looks like and the same seed always
-// gives the same frame. The HUD stays on: the judge reads the game from these frames.
+// The deterministic screenshot scenes behind ?shot=start|play|chase|end. Each one plays
+// the real rules forward from a fresh world for a fixed number of steps, steered by a
+// simple autopilot, so the frame is what a short game really looks like and the same
+// seed always gives the same frame. The HUD stays on: the judge reads the game from
+// these frames.
 import { STEP } from './config.js';
 
-function fakeInput(drive) {
+function autopilot() {
   return {
     move() {
-      return drive ? { x: 0, y: 1 } : { x: 0, y: 1 };
+      return { x: 0, y: 1 };
     },
     run() {
       return false;
@@ -30,8 +31,8 @@ function fakeInput(drive) {
   };
 }
 
-function runSteps(game, seconds, drive) {
-  const input = fakeInput(drive);
+function runSteps(game, seconds) {
+  const input = autopilot();
   const steps = Math.round(seconds / STEP);
   for (let i = 0; i < steps; i += 1) {
     game.step(STEP, input, i * STEP);
@@ -48,7 +49,7 @@ export function stageShot(name, game, render) {
   if (name === 'play') {
     // On foot at a busy intersection, walking down the road as traffic passes.
     game.debugTeleport(-56, -56, 0);
-    runSteps(game, 10, false);
+    runSteps(game, 10);
     game.debugStageStreet();
     return 'play';
   }
@@ -57,7 +58,7 @@ export function stageShot(name, game, render) {
     game.debugTeleport(-168, -80, 0);
     game.debugEnterNearestCar();
     game.debugSetWanted(3);
-    runSteps(game, 5, true);
+    runSteps(game, 5);
     return 'play';
   }
   if (name === 'end') {
@@ -65,14 +66,14 @@ export function stageShot(name, game, render) {
     game.debugTeleport(-168, -80, 0);
     game.debugEnterNearestCar();
     game.debugSetWanted(3);
-    runSteps(game, 4, true);
+    runSteps(game, 4);
     game.debugExitCar();
     game.debugSetHealth(0);
     game.state.gameOver = 'wasted';
-    game.step(STEP, fakeInput(false), 99); // one step so the HUD paints the final state
+    game.step(STEP, autopilot(), 99); // one step so the HUD paints the final state
     return 'over';
   }
   // Title: the city alive behind the menu, traffic rolling, palms in the sun.
-  runSteps(game, 5, false);
+  runSteps(game, 5);
   return 'title';
 }

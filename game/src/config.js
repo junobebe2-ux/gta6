@@ -1,15 +1,17 @@
-// Every tuning number, colour and city constant in one place. Solmar City is a sun-soaked
-// coastal city on a road grid: roads every PITCH metres, buildings filling the blocks between
-// them, a beach on the east edge. Nothing here names a real place or a commercial game.
-export const CITY = {
-  pitch: 56, // road centre to road centre
-  roadHalf: 6, // half the road width (roads are 12 m wide)
-  grid: 4, // roads at -4..4 * pitch
-  bound: 252, // the playable edge; the beach lies just past it
-  blockInset: 2, // sidewalks eat this much of each block edge
-};
+// Solmar City tuning: every number the game balances on lives here, so a tweak never
+// means hunting through the simulation. The city is a sun-soaked coastal grid — roads
+// every PITCH metres, blocks full of buildings, a beach on the east edge. All names are
+// invented; nothing here points at a real place or a commercial game.
 
-export const STEP = 1 / 60; // fixed simulation step, 60 updates a second
+export const STEP = 1 / 60; // fixed simulation step: sixty updates a second
+
+export const CITY = {
+  pitch: 56, // centre-to-centre distance between roads
+  roadHalf: 6, // roads are 12 m wide
+  grid: 4, // road lines at -4..4 times the pitch
+  bound: 252, // playable edge; the beach starts just past it
+  blockInset: 2, // how much sidewalk each block edge gives up
+};
 
 export const PLAYER = {
   walkSpeed: 6.5,
@@ -21,15 +23,15 @@ export const PLAYER = {
   shootRange: 70,
   shootDamage: 34,
   shootCooldown: 0.22,
-  regenDelay: 8,
-  regenRate: 6,
+  regenDelay: 8, // quiet seconds before health starts coming back
+  regenRate: 6, // health per second while regenerating
 };
 
 export const CAR = {
   accel: 16,
   brake: 30,
   reverseAccel: 10,
-  maxSpeed: 34,
+  maxSpeed: 34, // m/s, about 122 km/h
   maxReverse: 10,
   steer: 1.9,
   grip: 6,
@@ -43,17 +45,17 @@ export const PEDS = { count: 16, walkSpeed: 1.6, runSpeed: 4.5 };
 
 export const WANTED = {
   max: 5,
-  stealCar: 1, // stealing an occupied car; an empty parked car is free
+  stealCar: 1, // an occupied car; an empty parked car is free
   hitPed: 1,
   shoot: 1,
   killCop: 2,
   explodeCar: 1,
-  decayDelay: 10, // seconds with no police near and no crime before the level drops
+  decayDelay: 10, // crime-free seconds before the level can fall
   decayEvery: 6, // seconds per star lost while cooling down
-  bustedHold: 3, // seconds a cop must hold the player on foot to bust them
+  bustedHold: 3, // seconds a cop must hold the player to bust them
   policeCarPerStar: 1,
   maxPoliceCars: 4,
-  footCopsAt: 2,
+  footCopsAt: 2, // wanted level where foot cops join in
   maxFootCops: 2,
 };
 
@@ -111,5 +113,5 @@ export const PALETTE = {
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
-/** Where the save lives between visits (this browser only). */
+/** localStorage key for the save (this browser only). */
 export const SAVE_KEY = 'solmar-city.save.v1';

@@ -1,9 +1,11 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps,
-// and the renderer paints what is there. The game moves between four screens: title, play,
-// paused and game over. Behind the title the city lives on its own (attract mode).
+// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s
+// steps, and the renderer paints what is there. The game moves between four screens:
+// title, play, paused and game over. Behind the title the city lives on its own
+// (attract mode).
 //
-// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that scene instead
-// of running the loop, paints it twice and sets window.__shotReady for a screenshot.
+// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that scene
+// instead of running the loop, paints it twice and sets window.__shotReady for a
+// screenshot.
 import * as THREE from 'three';
 import { STEP } from './config.js';
 import { createRandom } from './random.js';

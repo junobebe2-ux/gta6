@@ -1,5 +1,6 @@
-// The HUD: health, cash, wanted stars, the mission objective, speed, a canvas minimap and
-// the message feed, all DOM except the minimap. The game writes state in; this module paints it.
+// The HUD: health, cash, wanted stars, the mission objective, speed, a canvas
+// minimap and the message feed, all DOM except the minimap. The game writes state
+// in; this module paints it.
 import { CITY } from './config.js';
 
 export function createHud(city) {
@@ -94,7 +95,8 @@ export function createHud(city) {
 
   return {
     update(state, t) {
-      healthFill.style.width = `${Math.max(0, Math.min(100, state.health))}%`;
+      const hp = Math.max(0, Math.min(100, state.health));
+      healthFill.style.width = `${hp}%`;
       healthFill.style.background = state.health > 50 ? '#4caf50' : state.health > 25 ? '#ff9800' : '#f44336';
       healthText.textContent = `${Math.ceil(state.health)}`;
       cashText.textContent = `$${state.cash.toLocaleString('en-US')}`;

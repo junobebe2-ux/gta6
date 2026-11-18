@@ -1,6 +1,7 @@
-// The police: cars that hunt the player along the roads and foot cops who run them down.
-// Counts follow the wanted level. A cop that holds the player on foot busts them; a police
-// car that rams the player's car hurts them. When the heat is off, the police drive away.
+// The police: cars that hunt the player along the roads and foot cops who run them
+// down. Counts follow the wanted level. A cop that holds the player on foot busts
+// them; a police car that rams the player's car hurts them. When the heat is off, the
+// police drive away.
 import * as THREE from 'three';
 import { WANTED } from './config.js';
 import { createPoliceCar, updatePoliceLights } from './vehicles.js';
@@ -19,7 +20,7 @@ export function createPolice(scene, city, rng) {
   return { scene, city, rng, cars: [], cops: [] };
 }
 
-function spawnPoliceCarAt(police, px, pz) {
+function spawnPoliceCar(police, px, pz) {
   const spot = spawnPointNear(police.city, px, pz, police.rng, 55, 110);
   const heading = Math.atan2(px - spot.x, pz - spot.z);
   const car = createPoliceCar(police.scene, spot.x, spot.z, heading);
@@ -28,7 +29,7 @@ function spawnPoliceCarAt(police, px, pz) {
   return car;
 }
 
-function spawnFootCopAt(police, px, pz) {
+function spawnFootCop(police, px, pz) {
   const spot = spawnPointNear(police.city, px, pz, police.rng, 25, 60);
   const { group, parts } = createPersonMesh(0x1c2a44, 0x1c2733, 0xe8b88a, 1.06);
   // A cap, so cops read as cops at a glance.
@@ -63,6 +64,13 @@ function removeCop(police, cop) {
   police.cops.splice(police.cops.indexOf(cop), 1);
 }
 
+function angleDiff(target, current) {
+  let diff = target - current;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return diff;
+}
+
 /**
  * One police step. ctx: {x, z, inCar, wanted, dt, t, cars, onPlayerDamage(amount, kind),
  * onBusted(), city}. Police cars ram; foot cops chase on foot and hold the player to bust them.
@@ -71,8 +79,8 @@ export function stepPolice(police, ctx) {
   const { wanted, dt } = ctx;
   const wantCars = wanted >= 1 ? Math.min(WANTED.maxPoliceCars, wanted * WANTED.policeCarPerStar) : 0;
   const wantCops = wanted >= WANTED.footCopsAt ? Math.min(WANTED.maxFootCops, wanted - 1) : 0;
-  while (police.cars.length < wantCars) spawnPoliceCarAt(police, ctx.x, ctx.z);
-  while (police.cops.length < wantCops) spawnFootCopAt(police, ctx.x, ctx.z);
+  while (police.cars.length < wantCars) spawnPoliceCar(police, ctx.x, ctx.z);
+  while (police.cops.length < wantCops) spawnFootCop(police, ctx.x, ctx.z);
 
   // Police cars: chase along the roads, ram when close.
   for (const car of [...police.cars]) {
@@ -86,11 +94,8 @@ export function stepPolice(police, ctx) {
     const snap = dist > 28 ? Math.PI / 2 : 0.35;
     let desired = Math.atan2(dx, dz);
     if (snap > 0.4) desired = Math.round(desired / snap) * snap;
-    let diff = desired - car.heading;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
     const turnRate = dist > 28 ? 2.4 : 3.6;
-    car.heading += Math.max(-turnRate * dt, Math.min(turnRate * dt, diff));
+    car.heading += Math.max(-turnRate * dt, Math.min(turnRate * dt, angleDiff(desired, car.heading)));
     const targetSpeed = wanted === 0 ? 10 : Math.min(30, 20 + wanted * 2.5 + (dist < 20 ? 6 : 0));
     car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 1.5);
     const ox = car.x;
@@ -114,8 +119,7 @@ export function stepPolice(police, ctx) {
     car.ramCooldown = Math.max(0, (car.ramCooldown || 0) - dt);
     if (pd < 3.2 && car.ramCooldown <= 0) {
       car.ramCooldown = 1.2;
-      if (ctx.inCar) ctx.onPlayerDamage(6, 'ram');
-      else ctx.onPlayerDamage(22, 'ram');
+      ctx.onPlayerDamage(ctx.inCar ? 6 : 22, 'ram');
       // Bounce the police car off so it does not grind the player every frame.
       car.x -= Math.sin(car.heading) * 4;
       car.z -= Math.cos(car.heading) * 4;

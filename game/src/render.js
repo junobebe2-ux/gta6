@@ -1,6 +1,7 @@
-// The renderer: a WebGL canvas, the chase camera, and the cheap effects — particles for
-// explosions and dust, a tracer line for gunshots, a flash light for muzzle and blasts.
-// The camera sits behind the player (or the car), orbits with the mouse, and eases back.
+// The renderer: a WebGL canvas, the chase camera, and the cheap effects — one reused
+// particle cloud for explosions and dust, one reused line for gunshot tracers, one
+// reused point light for muzzle flashes and blasts. The camera sits behind the player
+// (or the car), orbits with the mouse, and eases back to straight behind.
 import * as THREE from 'three';
 
 const PARTICLE_MAX = 320;
@@ -13,7 +14,7 @@ export function createRender(canvas) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
 
-  // Particles: one THREE.Points, dead particles parked far below the city.
+  // Particles: one THREE.Points. Dead particles are parked far below the city.
   const pGeo = new THREE.BufferGeometry();
   const pPos = new Float32Array(PARTICLE_MAX * 3);
   const pCol = new Float32Array(PARTICLE_MAX * 3);
@@ -32,7 +33,7 @@ export function createRender(canvas) {
   }
   let pNext = 0;
 
-  // Tracer: one line reused for every shot.
+  // Tracer: one line, reused for every shot.
   const tracerGeo = new THREE.BufferGeometry();
   tracerGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
   const tracer = new THREE.Line(
@@ -83,12 +84,13 @@ export function createRender(canvas) {
       camDist += (dist - camDist) * Math.min(1, dt * 3);
       // The camera trails behind the focus heading, plus the mouse orbit offset.
       const yaw = focus.heading + Math.PI + camYaw;
+      const ease = Math.min(1, dt * 6);
       const tx = focus.x + Math.sin(yaw) * camDist;
       const tz = focus.z + Math.cos(yaw) * camDist;
       const ty = height + Math.sin(camPitch) * camDist * 0.4;
-      camera.position.x += (tx - camera.position.x) * Math.min(1, dt * 6);
-      camera.position.y += (ty - camera.position.y) * Math.min(1, dt * 6);
-      camera.position.z += (tz - camera.position.z) * Math.min(1, dt * 6);
+      camera.position.x += (tx - camera.position.x) * ease;
+      camera.position.y += (ty - camera.position.y) * ease;
+      camera.position.z += (tz - camera.position.z) * ease;
       camera.lookAt(focus.x + Math.sin(focus.heading) * 2, mode === 'car' ? 1.6 : 1.4, focus.z + Math.cos(focus.heading) * 2);
       // The orbit offset eases back to straight behind when the mouse rests.
       camYaw *= Math.max(0, 1 - dt * 0.25);

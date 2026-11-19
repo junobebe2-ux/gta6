@@ -325,7 +325,16 @@ export function createGame(deps) {
     }
     car.x = fixed.x;
     car.z = fixed.z;
-    // Car-car bumps.
+    // Car-car bumps. A traffic or parked car is a crash: it shoves the player
+    // and bleeds speed. A police car is different — it already has its own
+    // pressure, the ram (5 damage per 2.5 s), and it chases by staying glued
+    // to the player. If the per-frame speed cut applied to police cars too,
+    // one car inside 4.2 m pinned the player at ~7 m/s forever (the cut runs
+    // every step, so speed never recovers), and the escape became
+    // uncompletable no matter how well the player drove — the player is
+    // supposed to outrun the police (top speed 34 vs their 30), not be
+    // grappled by them. So police cars still push the player out of the
+    // overlap, but they do not cut speed; the ram is what hurts.
     for (const other of [...cars, ...police.cars]) {
       if (other === car || !other.alive) continue;
       const dx = other.x - car.x;
@@ -342,7 +351,7 @@ export function createGame(deps) {
           other.z += nz * push;
           other.group.position.set(other.x, 0, other.z);
         }
-        if (Math.abs(car.speed) > 7) {
+        if (other.kind !== 'police' && Math.abs(car.speed) > 7) {
           audio.crash();
           car.speed *= 0.7;
         }
@@ -768,6 +777,15 @@ export function createGame(deps) {
     /** How many police cars are on the street right now. */
     policeCarCount() {
       return police.cars.length;
+    },
+    /** Distance to the nearest police unit (car or living foot cop), for headless playtests. */
+    nearestPoliceDist() {
+      let best = Infinity;
+      for (const car of police.cars) best = Math.min(best, Math.hypot(car.x - player.x, car.z - player.z));
+      for (const cop of police.cops) {
+        if (cop.alive) best = Math.min(best, Math.hypot(cop.x - player.x, cop.z - player.z));
+      }
+      return best === Infinity ? -1 : Math.round(best * 10) / 10;
     },
   };
 }

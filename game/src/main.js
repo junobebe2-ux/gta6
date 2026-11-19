@@ -61,6 +61,7 @@ window.__gameState = () => JSON.stringify({
   nearestPed: game.nearestPedPos(),
   pickupSpots: game.pickupPositions(),
   policeCars: game.policeCarCount(),
+  nearestPolice: game.nearestPoliceDist(),
 });
 
 const screens = {

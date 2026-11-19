@@ -1,6 +1,6 @@
-// The HUD: health, cash, wanted stars, the mission objective, speed, a canvas
-// minimap and the message feed, all DOM except the minimap. The game writes state
-// in; this module paints it.
+// The HUD: health bar, cash, wanted stars and the live wanted line, the mission
+// objective, speed, the prompt, the message feed, and a canvas minimap. Everything
+// is DOM except the minimap. The game hands state in; this module paints it.
 import { CITY } from './config.js';
 
 export function createHud(city) {
@@ -8,6 +8,8 @@ export function createHud(city) {
   const healthFill = el('health-fill');
   const healthText = el('health-text');
   const cashText = el('cash');
+  const pickupsEl = el('pickups');
+  const wantedEl = el('wanted');
   const starsEl = el('stars');
   const objectiveEl = el('objective');
   const speedEl = el('speed');
@@ -16,36 +18,35 @@ export function createHud(city) {
   const feedEl = el('feed');
   const minimap = el('minimap');
   const mctx = minimap.getContext('2d');
-  const size = minimap.width;
-  const scale = size / (CITY.bound * 2 + 140);
-  const toMap = (x, z) => [(x + CITY.bound + 70) * scale, (z + CITY.bound + 70) * scale];
+  const mapSize = minimap.width;
+  const mapScale = mapSize / (CITY.bound * 2 + 140);
+  const toMap = (x, z) => [(x + CITY.bound + 70) * mapScale, (z + CITY.bound + 70) * mapScale];
   let bannerTimer = null;
-  let lastStars = -1;
+  let shownStars = -1;
 
-  function drawMinimap(state, t) {
-    const w = size;
-    mctx.clearRect(0, 0, w, w);
+  function paintGround() {
+    mctx.clearRect(0, 0, mapSize, mapSize);
     mctx.fillStyle = '#10151c';
-    mctx.fillRect(0, 0, w, w);
-    // Beach on the east edge.
-    const [bx] = toMap(CITY.bound, 0);
+    mctx.fillRect(0, 0, mapSize, mapSize);
+    // Beach on the east edge, water past it.
+    const [beachX] = toMap(CITY.bound, 0);
     mctx.fillStyle = '#c8b078';
-    mctx.fillRect(bx, 0, w - bx, w);
+    mctx.fillRect(beachX, 0, mapSize - beachX, mapSize);
     mctx.fillStyle = '#2f7fb8';
-    mctx.fillRect(bx + (w - bx) * 0.45, 0, w - bx, w);
-    // Roads.
+    mctx.fillRect(beachX + (mapSize - beachX) * 0.45, 0, mapSize - beachX, mapSize);
+    // Roads as dark strokes.
     mctx.strokeStyle = '#3a3f46';
-    mctx.lineWidth = Math.max(2, 12 * scale);
+    mctx.lineWidth = Math.max(2, 12 * mapScale);
     for (const c of city.roads) {
-      const [x1] = toMap(c, 0);
+      const [vx] = toMap(c, 0);
       mctx.beginPath();
-      mctx.moveTo(x1, 0);
-      mctx.lineTo(x1, w);
+      mctx.moveTo(vx, 0);
+      mctx.lineTo(vx, mapSize);
       mctx.stroke();
-      const [, z1] = toMap(0, c);
+      const [, hz] = toMap(0, c);
       mctx.beginPath();
-      mctx.moveTo(0, z1);
-      mctx.lineTo(w, z1);
+      mctx.moveTo(0, hz);
+      mctx.lineTo(mapSize, hz);
       mctx.stroke();
     }
     // Buildings as pale blocks.
@@ -55,6 +56,9 @@ export function createHud(city) {
       const [x2, z2] = toMap(b.maxX, b.maxZ);
       mctx.fillRect(x1, z1, Math.max(1, x2 - x1), Math.max(1, z2 - z1));
     }
+  }
+
+  function paintMarkers(state, t) {
     // Mission target: a pulsing yellow diamond.
     if (state.missionTarget) {
       const [mx, mz] = toMap(state.missionTarget.x, state.missionTarget.z);
@@ -77,6 +81,16 @@ export function createHud(city) {
       mctx.arc(cx, cz, car.isPolice ? 3 : 2, 0, Math.PI * 2);
       mctx.fill();
     }
+    // Cash pickups: small gold dots.
+    if (state.pickupPositions) {
+      mctx.fillStyle = '#ffd23e';
+      for (const p of state.pickupPositions) {
+        const [px, pz] = toMap(p.x, p.z);
+        mctx.beginPath();
+        mctx.arc(px, pz, 2, 0, Math.PI * 2);
+        mctx.fill();
+      }
+    }
     // The player: a yellow arrow, rotated to face their heading.
     const [px, pz] = toMap(state.x, state.z);
     mctx.save();
@@ -93,6 +107,11 @@ export function createHud(city) {
     mctx.restore();
   }
 
+  function paintMinimap(state, t) {
+    paintGround();
+    paintMarkers(state, t);
+  }
+
   return {
     update(state, t) {
       const hp = Math.max(0, Math.min(100, state.health));
@@ -100,8 +119,17 @@ export function createHud(city) {
       healthFill.style.background = state.health > 50 ? '#4caf50' : state.health > 25 ? '#ff9800' : '#f44336';
       healthText.textContent = `${Math.ceil(state.health)}`;
       cashText.textContent = `$${state.cash.toLocaleString('en-US')}`;
-      if (state.wanted !== lastStars) {
-        lastStars = state.wanted;
+      pickupsEl.textContent = state.pickups > 0 ? `Cash found: ${state.pickups}` : '';
+      // The wanted line is live: it always shows the current level and the last
+      // reason, so it can never go stale while the stars change underneath it.
+      if (state.wanted > 0) {
+        wantedEl.style.display = 'block';
+        wantedEl.textContent = `Wanted level ${state.wanted}` + (state.wantedReason ? ` — ${state.wantedReason}` : '');
+      } else {
+        wantedEl.style.display = 'none';
+      }
+      if (state.wanted !== shownStars) {
+        shownStars = state.wanted;
         starsEl.textContent = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
         starsEl.classList.toggle('hot', state.wanted >= 3);
       }
@@ -114,7 +142,7 @@ export function createHud(city) {
       }
       promptEl.textContent = state.prompt || '';
       promptEl.style.display = state.prompt ? 'block' : 'none';
-      drawMinimap(state, t);
+      paintMinimap(state, t);
     },
     message(text) {
       const div = document.createElement('div');

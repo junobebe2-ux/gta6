@@ -1,15 +1,17 @@
-// The simulation: the player on foot and behind the wheel, traffic, pedestrians, the
-// police, the wanted level, combat and the missions, all stepped at 60 Hz. The
-// renderer, the HUD and the audio are handed in; this module owns the world state and
-// the rules.
+// The simulation: the player on foot and behind the wheel, traffic, pedestrians,
+// the police, the wanted level, combat and the missions, all stepped at 60 Hz.
+// The renderer, the HUD and the audio are handed in; this module owns the world
+// state and the rules.
 import * as THREE from 'three';
 import { CAR, CITY, MISSIONS, PEDS, PLAYER, TRAFFIC, PARKED, WANTED } from './config.js';
 import { createTrafficCar, createParkedCar, stepTraffic } from './vehicles.js';
 import { createPedestrian, stepPedestrian, killPedestrian, createPersonMesh, animateWalk } from './people.js';
 import { createPolice, stepPolice, clearPolice } from './police.js';
 import { createMissions, missionTarget, missionObjective, updateMissions, completeMission, createBeacon } from './missions.js';
+import { createPickups, stepPickups, PICKUP_VALUE } from './pickups.js';
 import { writeSave } from './save.js';
 
+// Mark a mesh (and everything under it) as something a bullet can hit.
 function tagShootable(group, type, ref) {
   group.userData.shootable = { type, ref };
   group.traverse((o) => {
@@ -39,12 +41,13 @@ export function createGame(deps) {
     missionsDone: save ? save.missionsDone : 0,
     totalEarned: save ? save.totalEarned : 0,
     wanted: 0,
+    wantedReason: '',
     lastCrime: -999,
     lastDamage: -999,
     heatTimer: 0,
     shootCooldown: 0,
     gameOver: null,
-    stats: { carsStolen: 0, pedsDown: 0, copsDown: 0, shotsFired: 0 },
+    stats: { carsStolen: 0, pedsDown: 0, copsDown: 0, shotsFired: 0, pickups: 0 },
     saveTimer: 0,
   };
 
@@ -58,8 +61,8 @@ export function createGame(deps) {
   const missions = createMissions(city.places, save ? save.missionsDone : 0);
   const beacon = createBeacon(scene);
 
-  // Traffic, parked cars, pedestrians. One parked car always waits by Rico's garage,
-  // so the first job (steal a car) is right there.
+  // Traffic, parked cars, pedestrians. One parked car always waits by Rico's
+  // garage, so the first job (steal a car) is right there.
   const cars = [];
   for (let i = 0; i < TRAFFIC.cars; i += 1) {
     const car = createTrafficCar(scene, rng);
@@ -86,6 +89,7 @@ export function createGame(deps) {
     peds.push(ped);
   }
   const police = createPolice(scene, city, rng);
+  const pickups = createPickups(scene, city, rng);
 
   let drivenCar = null;
   let threat = null;
@@ -104,8 +108,10 @@ export function createGame(deps) {
     state.lastCrime = state.time;
     state.heatTimer = 0;
     if (state.wanted > before) {
+      // The reason is painted live by the HUD's wanted line; no feed message
+      // here, or the line would go stale the moment the level rises again.
+      state.wantedReason = reason;
       audio.wantedUp();
-      hud.message(`Wanted level ${state.wanted} — ${reason}`);
     }
   }
 
@@ -163,6 +169,11 @@ export function createGame(deps) {
     return best;
   }
 
+  /** Positions of the pickups still on the street, for the minimap and playtests. */
+  function pickupPositions() {
+    return pickups.filter((p) => p.respawn <= 0).map((p) => ({ x: Math.round(p.x), z: Math.round(p.z) }));
+  }
+
   function enterCar(car) {
     drivenCar = car;
     car.kind = 'driven';
@@ -195,6 +206,16 @@ export function createGame(deps) {
     player.mesh.position.set(player.x, 0, player.z);
   }
 
+  // A cop goes down: lie flat for a while, then get taken away.
+  function dropCop(cop) {
+    cop.alive = false;
+    cop.deadTimer = 18;
+    cop.group.rotation.x = -Math.PI / 2;
+    cop.group.position.y = 0.35;
+    state.stats.copsDown += 1;
+    addWanted(WANTED.killCop, 'officer down');
+  }
+
   function shoot() {
     if (state.shootCooldown > 0 || state.gameOver) return;
     state.shootCooldown = PLAYER.shootCooldown;
@@ -223,14 +244,7 @@ export function createGame(deps) {
           const cop = tag.ref;
           cop.health = (cop.health || 100) - PLAYER.shootDamage;
           render.burst(end.x, end.y, end.z, 0xc23b2e, 10, 3, 2);
-          if (cop.health <= 0) {
-            cop.alive = false;
-            cop.deadTimer = 18;
-            cop.group.rotation.x = -Math.PI / 2;
-            cop.group.position.y = 0.35;
-            state.stats.copsDown += 1;
-            addWanted(WANTED.killCop, 'officer down');
-          }
+          if (cop.health <= 0) dropCop(cop);
         } else if (tag.type === 'car') {
           const car = tag.ref;
           car.health -= PLAYER.shootDamage;
@@ -277,14 +291,7 @@ export function createGame(deps) {
       cop.health = (cop.health || 100) - PLAYER.punchDamage;
       cop.x += fx * 1.5;
       cop.z += fz * 1.5;
-      if (cop.health <= 0) {
-        cop.alive = false;
-        cop.deadTimer = 18;
-        cop.group.rotation.x = -Math.PI / 2;
-        cop.group.position.y = 0.35;
-        state.stats.copsDown += 1;
-        addWanted(WANTED.killCop, 'officer down');
-      }
+      if (cop.health <= 0) dropCop(cop);
     }
   }
 
@@ -301,7 +308,11 @@ export function createGame(deps) {
     car.speed = Math.max(-CAR.maxReverse, Math.min(CAR.maxSpeed, car.speed));
     const steerAuthority = 1 / (1 + Math.abs(car.speed) * 0.045);
     const steering = Math.abs(car.speed) > 0.3 ? 1 : 0;
-    car.heading += move.x * CAR.steer * steerAuthority * dt * (car.speed >= 0 ? 1 : -1) * steering;
+    // Steer toward the screen-right: the chase camera sits behind the car, so
+    // pressing D (move.x +1) must turn the nose right, which is a DECREASING
+    // heading (forward is (sin h, cos h); right is (-cos h, sin h)). The
+    // (speed >= 0 ? 1 : -1) factor keeps the wheel correct when reversing.
+    car.heading -= move.x * CAR.steer * steerAuthority * dt * (car.speed >= 0 ? 1 : -1) * steering;
     const ox = car.x;
     const oz = car.z;
     car.x += Math.sin(car.heading) * car.speed * dt;
@@ -414,12 +425,15 @@ export function createGame(deps) {
         health: state.health,
         cash: state.cash,
         wanted: state.wanted,
+        wantedReason: state.wantedReason,
+        pickups: state.stats.pickups,
         objective: missionObjective(missions),
         inCar: !!drivenCar,
         speed: drivenCar ? drivenCar.speed : 0,
         prompt,
         missionTarget: target,
         cars: [...cars, ...police.cars],
+        pickupPositions: pickupPositions(),
         x: player.x,
         z: player.z,
         heading: player.heading,
@@ -465,8 +479,8 @@ export function createGame(deps) {
       threatTimer -= dt;
       if (threatTimer <= 0) threat = null;
     }
-    // The actions for this frame arrive from the caller, which is the single reader of
-    // the input's one-shot set: a second takeActions() here would eat them.
+    // The actions for this frame arrive from the caller, which is the single
+    // reader of the input's one-shot set: a second takeActions() here would eat them.
     const acts = actions || input.takeActions();
     if (acts.has('KeyF') && !drivenCar) punch();
     if (acts.has('KeyE')) {
@@ -554,6 +568,16 @@ export function createGame(deps) {
       }
     }
 
+    // Cash pickups: walking or driving over one banks it.
+    const got = stepPickups(pickups, { x: player.x, z: player.z, city, rng }, dt, t);
+    if (got > 0) {
+      state.cash += got * PICKUP_VALUE;
+      state.totalEarned += got * PICKUP_VALUE;
+      state.stats.pickups += got;
+      audio.pickup();
+      render.burst(player.x, 1.2, player.z, 0xffc832, 14, 4, 3);
+    }
+
     // Missions.
     const events = updateMissions(missions, {
       x: player.x,
@@ -593,6 +617,7 @@ export function createGame(deps) {
   function reset() {
     state.health = PLAYER.health;
     state.wanted = 0;
+    state.wantedReason = '';
     state.gameOver = null;
     state.lastCrime = -999;
     state.lastDamage = -999;
@@ -648,9 +673,9 @@ export function createGame(deps) {
     state.health = h;
   }
   /**
-   * Staging helper for the ?shot=play screenshot: put a few traffic cars ahead of the
-   * player on their road and a few pedestrians on the nearby sidewalk, so the street
-   * reads as alive in a single frame.
+   * Staging helper for the ?shot=play screenshot: put a few traffic cars ahead of
+   * the player on their road and a few pedestrians on the nearby sidewalk, so the
+   * street reads as alive in a single frame.
    */
   function debugStageStreet() {
     const fx = Math.sin(player.heading);
@@ -707,6 +732,31 @@ export function createGame(deps) {
     nearestCarDist() {
       const car = nearestCar(999);
       return car ? Math.hypot(car.x - player.x, car.z - player.z) : -1;
+    },
+    /** Nearest car's position, for headless playtests. */
+    nearestCarPos() {
+      const car = nearestCar(999);
+      return car ? { x: Math.round(car.x), z: Math.round(car.z) } : null;
+    },
+    /** Nearest living pedestrian's position, for headless playtests. */
+    nearestPedPos() {
+      let best = null;
+      let bestD = Infinity;
+      for (const ped of peds) {
+        if (ped.state === 'dead') continue;
+        const d = Math.hypot(ped.x - player.x, ped.z - player.z);
+        if (d < bestD) {
+          bestD = d;
+          best = ped;
+        }
+      }
+      return best ? { x: Math.round(best.x), z: Math.round(best.z), dist: Math.round(bestD * 10) / 10 } : null;
+    },
+    /** Positions of the pickups still on the street, for the minimap and playtests. */
+    pickupPositions,
+    /** How many police cars are on the street right now. */
+    policeCarCount() {
+      return police.cars.length;
     },
   };
 }

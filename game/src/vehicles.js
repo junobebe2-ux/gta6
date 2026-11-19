@@ -1,7 +1,7 @@
-// Cars: a procedural low-poly car built from boxes (no model files), plus the traffic
-// AI that drives them along the road grid. Parked cars sit empty at the kerb; traffic
-// cars are occupied; police cars chase. A car's heading is an angle where 0 means +z
-// and PI/2 means +x.
+// Cars: a procedural low-poly car built from boxes (no model files), plus the
+// traffic AI that drives them along the road grid. Parked cars sit empty at the
+// kerb; traffic cars are occupied; police cars chase. A car's heading is an angle
+// where 0 means +z and PI/2 means +x.
 import * as THREE from 'three';
 import { CAR, CITY } from './config.js';
 
@@ -10,8 +10,9 @@ const GLASS = new THREE.MeshLambertMaterial({ color: 0x1c2733 });
 const TYRE = new THREE.MeshLambertMaterial({ color: 0x14161a });
 const LIGHT_FRONT = new THREE.MeshLambertMaterial({ color: 0xfff6c8, emissive: 0x888866 });
 const LIGHT_BACK = new THREE.MeshLambertMaterial({ color: 0xc23b2e, emissive: 0x550000 });
+const WHEEL_SPOTS = [[-0.88, 1.35], [0.88, 1.35], [-0.88, -1.35], [0.88, -1.35]];
 
-function part(w, h, d, mat, x, y, z) {
+function box(w, h, d, mat, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
@@ -24,20 +25,20 @@ export function createCarMesh(color, police) {
   const roofMat = police
     ? new THREE.MeshLambertMaterial({ color: 0xe8e8e8 })
     : new THREE.MeshLambertMaterial({ color });
-  group.add(part(1.9, 0.55, 4.2, paint, 0, 0.62, 0));
-  group.add(part(1.7, 0.5, 2.1, GLASS, 0, 1.12, -0.2));
-  group.add(part(1.72, 0.12, 2.0, roofMat, 0, 1.38, -0.2));
+  group.add(box(1.9, 0.55, 4.2, paint, 0, 0.62, 0));
+  group.add(box(1.7, 0.5, 2.1, GLASS, 0, 1.12, -0.2));
+  group.add(box(1.72, 0.12, 2.0, roofMat, 0, 1.38, -0.2));
   // Bumpers and lights.
-  group.add(part(1.9, 0.22, 0.3, TYRE, 0, 0.42, 2.05));
-  group.add(part(1.9, 0.22, 0.3, TYRE, 0, 0.42, -2.05));
-  group.add(part(0.4, 0.18, 0.1, LIGHT_FRONT, -0.6, 0.72, 2.12));
-  group.add(part(0.4, 0.18, 0.1, LIGHT_FRONT, 0.6, 0.72, 2.12));
-  group.add(part(0.4, 0.18, 0.1, LIGHT_BACK, -0.6, 0.72, -2.12));
-  group.add(part(0.4, 0.18, 0.1, LIGHT_BACK, 0.6, 0.72, -2.12));
+  group.add(box(1.9, 0.22, 0.3, TYRE, 0, 0.42, 2.05));
+  group.add(box(1.9, 0.22, 0.3, TYRE, 0, 0.42, -2.05));
+  group.add(box(0.4, 0.18, 0.1, LIGHT_FRONT, -0.6, 0.72, 2.12));
+  group.add(box(0.4, 0.18, 0.1, LIGHT_FRONT, 0.6, 0.72, 2.12));
+  group.add(box(0.4, 0.18, 0.1, LIGHT_BACK, -0.6, 0.72, -2.12));
+  group.add(box(0.4, 0.18, 0.1, LIGHT_BACK, 0.6, 0.72, -2.12));
   const wheels = [];
   const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 10);
   wheelGeo.rotateZ(Math.PI / 2);
-  for (const [wx, wz] of [[-0.88, 1.35], [0.88, 1.35], [-0.88, -1.35], [0.88, -1.35]]) {
+  for (const [wx, wz] of WHEEL_SPOTS) {
     const w = new THREE.Mesh(wheelGeo, TYRE);
     w.position.set(wx, 0.36, wz);
     w.castShadow = true;
@@ -66,7 +67,8 @@ function syncMesh(car) {
   for (const w of car.wheels) w.rotation.x += (car.speed * 0.016) / 0.36;
 }
 
-function roadCoord(v) {
+// The road line nearest to v.
+function nearestRoad(v) {
   let best = CITY.pitch * -CITY.grid;
   let bestD = Infinity;
   for (let i = -CITY.grid; i <= CITY.grid; i += 1) {
@@ -80,7 +82,7 @@ function roadCoord(v) {
   return best;
 }
 
-function randomColour(rng) {
+function pickPaint(rng) {
   return PAINTS[Math.floor(rng.next() * PAINTS.length)];
 }
 
@@ -109,25 +111,21 @@ function makeCar(scene, x, z, heading, color, kind, police) {
   return car;
 }
 
-export function createTrafficCar(scene, rng) {
-  // Start on a random road, heading along it.
+function roadStart(rng, laneOffset) {
+  // A starting spot on a random road, heading along it.
   const axis = rng.next() < 0.5 ? 'x' : 'z';
   const coord = (Math.floor(rng.next() * (CITY.grid * 2 + 1)) - CITY.grid) * CITY.pitch;
   const along = rng.range(-220, 220);
   const dir = rng.next() < 0.5 ? 1 : -1;
-  let x;
-  let z;
-  let heading;
   if (axis === 'x') {
-    x = along;
-    z = coord + (dir > 0 ? 3 : -3);
-    heading = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-  } else {
-    x = coord + (dir > 0 ? -3 : 3);
-    z = along;
-    heading = dir > 0 ? 0 : Math.PI;
+    return { x: along, z: coord + (dir > 0 ? laneOffset : -laneOffset), heading: dir > 0 ? Math.PI / 2 : -Math.PI / 2 };
   }
-  const car = makeCar(scene, x, z, heading, randomColour(rng), 'traffic', false);
+  return { x: coord + (dir > 0 ? -laneOffset : laneOffset), z: along, heading: dir > 0 ? 0 : Math.PI };
+}
+
+export function createTrafficCar(scene, rng) {
+  const spot = roadStart(rng, 3);
+  const car = makeCar(scene, spot.x, spot.z, spot.heading, pickPaint(rng), 'traffic', false);
   car.targetSpeed = rng.range(7, 12);
   car.speed = car.targetSpeed;
   return car;
@@ -151,7 +149,7 @@ export function createParkedCar(scene, rng) {
     z = along;
     heading = dir > 0 ? 0 : Math.PI;
   }
-  return makeCar(scene, x, z, heading, randomColour(rng), 'parked', false);
+  return makeCar(scene, x, z, heading, pickPaint(rng), 'parked', false);
 }
 
 export function createPoliceCar(scene, x, z, heading) {
@@ -180,8 +178,8 @@ export function stepTraffic(car, dt, cars) {
   car.x += fx * car.speed * dt;
   car.z += fz * car.speed * dt;
   // Near an intersection: maybe turn.
-  const rx = roadCoord(car.x);
-  const rz = roadCoord(car.z);
+  const rx = nearestRoad(car.x);
+  const rz = nearestRoad(car.z);
   const nearX = Math.abs(car.x - rx) < 3;
   const nearZ = Math.abs(car.z - rz) < 3;
   if (nearX && nearZ && car.turnCooldown <= 0) {
@@ -205,6 +203,12 @@ export function stepTraffic(car, dt, cars) {
 export function updatePoliceLights(car, t) {
   if (!car.lightBar) return;
   const on = Math.sin(t * 12) > 0;
-  car.lightBar.userData.red.material.emissive.setHex(on ? 0xff0000 : 0x220000);
-  car.lightBar.userData.blue.material.emissive.setHex(on ? 0x0000ff : 0x000022);
+  const red = car.lightBar.userData.red;
+  const blue = car.lightBar.userData.blue;
+  // Alternate which half is lit, in both colour and glow, so the bar reads as
+  // flashing from across the street.
+  red.material.emissive.setHex(on ? 0xff0000 : 0x220000);
+  red.material.color.setHex(on ? 0xff2a1a : 0x5a0f08);
+  blue.material.emissive.setHex(on ? 0x000022 : 0x0000ff);
+  blue.material.color.setHex(on ? 0x0a1a5a : 0x2266ff);
 }

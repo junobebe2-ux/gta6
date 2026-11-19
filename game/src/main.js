@@ -1,11 +1,11 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s
-// steps, and the renderer paints what is there. The game moves between four screens:
-// title, play, paused and game over. Behind the title the city lives on its own
-// (attract mode).
+// Boot and the one loop: input is read every frame, the world advances in fixed
+// 1/60 s steps, and the renderer paints what is there. The game moves between four
+// screens: title, play, paused and game over. Behind the title the city lives on
+// its own (attract mode).
 //
-// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a
-// screenshot.
+// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that
+// scene instead of running the loop, paints it twice and sets window.__shotReady
+// for a screenshot.
 import * as THREE from 'three';
 import { STEP } from './config.js';
 import { createRandom } from './random.js';
@@ -14,12 +14,13 @@ import { createInput } from './input.js';
 import { createRender } from './render.js';
 import { buildCity } from './city.js';
 import { createGame } from './game.js';
+import { missionTarget, missionObjective } from './missions.js';
 import { createHud } from './hud.js';
 import { loadSave } from './save.js';
 import { stageShot } from './shots.js';
 
 const MAX_FRAME = 0.25;
-const EMPTY_ACTIONS = new Set();
+const NO_ACTIONS = new Set();
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
@@ -38,15 +39,28 @@ const game = createGame({ render, audio, hud, city, rng, save });
 
 // For headless playtests: a JSON snapshot of the live state.
 window.__gameState = () => JSON.stringify({
+  time: Math.round(game.state.time * 10) / 10,
+  camYaw: Math.round(render.getCamYaw() * 100) / 100,
+  heading: Math.round(game.player.heading * 100) / 100,
   wanted: game.state.wanted,
+  wantedReason: game.state.wantedReason,
   health: Math.round(game.state.health),
   cash: game.state.cash,
   inCar: game.isDriving(),
+  speed: game.isDriving() ? Math.round(game.drivenCar().speed * 10) / 10 : 0,
   missionsDone: game.state.missionsDone,
+  stage: game.missions.state.stage,
+  target: missionTarget(game.missions),
+  objective: missionObjective(game.missions),
+  pickups: game.state.stats.pickups,
   gameOver: game.state.gameOver,
   x: Math.round(game.player.x),
   z: Math.round(game.player.z),
   nearCar: Math.round(game.nearestCarDist() * 10) / 10,
+  nearestCar: game.nearestCarPos(),
+  nearestPed: game.nearestPedPos(),
+  pickupSpots: game.pickupPositions(),
+  policeCars: game.policeCarCount(),
 });
 
 const screens = {
@@ -67,7 +81,8 @@ function announce(message) {
   status.textContent = message;
 }
 
-function neutralInput() {
+// Input that never does anything (attract mode behind the title).
+function idleInput() {
   return {
     move: () => ({ x: 0, y: 0 }),
     run: () => false,
@@ -129,6 +144,11 @@ if (shot) {
     btnContinue.classList.remove('hidden');
   }
 
+  function toggleMute() {
+    audio.setMuted(!audio.isMuted());
+    btnMute.textContent = audio.isMuted() ? 'Unmute (M)' : 'Mute (M)';
+  }
+
   function startGame(fresh) {
     audio.unlock();
     if (fresh) {
@@ -155,10 +175,7 @@ if (shot) {
   });
   btnRestart.addEventListener('click', () => startGame(true));
   btnAgain.addEventListener('click', () => startGame(true));
-  btnMute.addEventListener('click', () => {
-    audio.setMuted(!audio.isMuted());
-    btnMute.textContent = audio.isMuted() ? 'Unmute (M)' : 'Mute (M)';
-  });
+  btnMute.addEventListener('click', toggleMute);
 
   document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
   document.addEventListener('keydown', () => audio.unlock(), { once: true });
@@ -178,10 +195,7 @@ if (shot) {
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
     const actions = input.takeActions();
-    if (actions.has('KeyM')) {
-      audio.setMuted(!audio.isMuted());
-      btnMute.textContent = audio.isMuted() ? 'Unmute (M)' : 'Mute (M)';
-    }
+    if (actions.has('KeyM')) toggleMute();
     if (screen === 'play' && (actions.has('Escape') || actions.has('KeyP'))) {
       screen = 'pause';
       showScreen('pause');
@@ -202,7 +216,7 @@ if (shot) {
         time += STEP;
         if (screen === 'play') {
           // One-shot actions go to the first step only, or E would enter and exit in one frame.
-          const over = game.step(STEP, input, time, firstStep ? actions : EMPTY_ACTIONS);
+          const over = game.step(STEP, input, time, firstStep ? actions : NO_ACTIONS);
           firstStep = false;
           if (over) {
             screen = 'over';
@@ -213,7 +227,7 @@ if (shot) {
           }
         } else {
           // Attract mode: the city lives, the player waits.
-          game.step(STEP, neutralInput(), time);
+          game.step(STEP, idleInput(), time);
         }
         accumulator -= STEP;
       }

@@ -529,12 +529,17 @@ export function createGame(deps) {
       }
     }
 
-    // Police.
+    // Police. During the bank hold the player is standing still holding E,
+    // so the police must close in without ramming or grabbing them — the hold
+    // is a timing challenge, and a hurt player would otherwise die before the
+    // escape even starts. That fairness switch rides along in the context.
+    const robbing = missions.state.stage === 'rob';
     stepPolice(police, {
       x: player.x,
       z: player.z,
       inCar: !!drivenCar,
       wanted: state.wanted,
+      robbing,
       dt,
       t,
       cars,
@@ -550,13 +555,19 @@ export function createGame(deps) {
     });
 
     // Wanted decay: quiet for a while with no police near, and the heat fades.
+    // The gap is 30 m. At 3-4 stars four police cars converge and box a slow
+    // car in, so a wider gap (50 m, then 40 m) was unreachable for a driver
+    // who starts the escape at low speed right after the final hit. 30 m still
+    // makes the player outrun the police (top speed 34 vs their 30) — hiding
+    // alone does not clear the heat.
     if (state.wanted > 0 && state.time - state.lastCrime > WANTED.decayDelay) {
       let nearest = Infinity;
-      for (const car of police.cars) nearest = Math.min(nearest, Math.hypot(car.x - player.x, car.z - player.z));
+      const gapTo = (x, z) => Math.hypot(x - player.x, z - player.z);
+      for (const car of police.cars) nearest = Math.min(nearest, gapTo(car.x, car.z));
       for (const cop of police.cops) {
-        if (cop.alive) nearest = Math.min(nearest, Math.hypot(cop.x - player.x, cop.z - player.z));
+        if (cop.alive) nearest = Math.min(nearest, gapTo(cop.x, cop.z));
       }
-      if (nearest > 50) {
+      if (nearest > 30) {
         state.heatTimer += dt;
         if (state.heatTimer >= WANTED.decayEvery) {
           state.heatTimer = 0;

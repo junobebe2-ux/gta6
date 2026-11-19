@@ -118,13 +118,16 @@ function chaseCar(police, car, ctx) {
   car.group.position.set(car.x, 0, car.z);
   car.group.rotation.y = car.heading;
   updatePoliceLights(car, ctx.t);
-  // Ram the player (once per cooldown, so three cars cannot melt them in a
-  // second). The cooldown is generous on purpose: a 3-star chase has to be
-  // survivable for the ~28 s it takes the heat to decay, so ramming pressures
-  // the player without ending the run in a few seconds.
+  // Ram the player, once per cooldown, so three cars cannot melt them in a
+  // second. The cooldown is generous on purpose: a 3-star chase has to stay
+  // survivable for the ~28 s the heat takes to decay, so ramming pressures
+  // the player without ending the run in a few seconds. The one exception is
+  // the bank hold (ctx.robbing): the cars keep closing in, but they do not
+  // ram a player who is standing still holding E.
   const pd = Math.hypot(ctx.x - car.x, ctx.z - car.z);
   car.ramCooldown = Math.max(0, (car.ramCooldown || 0) - dt);
-  if (pd < RAM_RANGE && car.ramCooldown <= 0) {
+  const mayRam = pd < RAM_RANGE && car.ramCooldown <= 0 && !ctx.robbing;
+  if (mayRam) {
     car.ramCooldown = RAM_COOLDOWN;
     ctx.onPlayerDamage(ctx.inCar ? RAM_DAMAGE_CAR : RAM_DAMAGE_FOOT, 'ram');
     // Bounce the police car off so it does not grind the player every frame.
@@ -155,7 +158,12 @@ function chaseCop(police, cop, ctx) {
   animateWalk(cop.parts, cop.phase, 0.9);
   cop.group.position.set(cop.x, 0, cop.z);
   cop.group.rotation.y = cop.heading;
-  if (!ctx.inCar && dist < BUST_RANGE) {
+  // A cop that holds the player on foot punches them and, held long enough,
+  // busts them. The bank hold is the exception: while the player is inside
+  // the bank mid-rob (ctx.robbing) the cops keep converging but do not grab
+  // them mid-hold.
+  const mayGrab = !ctx.inCar && dist < BUST_RANGE && !ctx.robbing;
+  if (mayGrab) {
     cop.punchTimer -= dt;
     if (cop.punchTimer <= 0) {
       cop.punchTimer = COP_PUNCH_EVERY;
@@ -172,8 +180,10 @@ function chaseCop(police, cop, ctx) {
 }
 
 /**
- * One police step. ctx: {x, z, inCar, wanted, dt, t, cars, onPlayerDamage(amount, kind),
+ * One police step. ctx: {x, z, inCar, wanted, robbing, dt, t, cars, onPlayerDamage(amount, kind),
  * onBusted(), city}. Police cars ram; foot cops chase on foot and hold the player to bust them.
+ * ctx.robbing is true while the player holds E inside the bank: the police still close in,
+ * but they neither ram nor grab the player during the hold.
  */
 export function stepPolice(police, ctx) {
   const { wanted } = ctx;

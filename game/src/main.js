@@ -1,250 +1,197 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed
-// 1/60 s steps, and the renderer paints what is there. The game moves between four
-// screens: title, play, paused and game over. Behind the title the city lives on
-// its own (attract mode).
+// Solmar City entry point: builds the world, wires every module together,
+// runs the frame loop, and exposes the debug state for playtesting.
 //
-// ?seed=N fixes the city. ?shot=start|play|chase|end (with &seed=N) stages that
-// scene instead of running the loop, paints it twice and sets window.__shotReady
-// for a screenshot.
-import * as THREE from 'three';
-import { STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createAudio } from './audio.js';
+// The driving bug lived here: the vehicle and police factories take the
+// built city object (with colliders, places and buildings) as their second
+// argument. Passing the config object instead left city.colliders undefined
+// and every driven frame threw "city.colliders is not iterable". The fix is
+// to hand them the real city returned by buildCity.
+import { CONFIG } from './config.js';
+import { makeRandom } from './random.js';
+import { writeSave } from './save.js';
 import { createInput } from './input.js';
-import { createRender } from './render.js';
+import { createAudio } from './audio.js';
+import { createRenderer } from './render.js';
 import { buildCity } from './city.js';
-import { createGame } from './game.js';
-import { missionTarget, missionObjective } from './missions.js';
+import { createPlayer } from './player.js';
+import { createVehicles } from './vehicles.js';
+import { createPeople } from './people.js';
+import { createPolice } from './police.js';
+import { createPickups } from './pickups.js';
+import { createMissions } from './missions.js';
 import { createHud } from './hud.js';
-import { loadSave } from './save.js';
-import { stageShot } from './shots.js';
+import { createGame } from './game.js';
+import { applyShot } from './shots.js';
 
-const MAX_FRAME = 0.25;
-const NO_ACTIONS = new Set();
-const params = new URLSearchParams(window.location.search);
+const params = new URLSearchParams(location.search);
+const seed = Number(params.get('seed') || 1) || 1;
 const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
-const rng = createRandom(seed);
 
-const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const render = createRender(canvas);
+const canvas = document.getElementById('game-canvas');
+const renderer = createRenderer(canvas);
+const scene = renderer.scene;
+const city = buildCity(scene, seed);
+const rng = makeRandom(seed);
+const input = createInput();
+input.attach();
 const audio = createAudio();
-const input = createInput(canvas);
-const city = buildCity(render.scene, rng);
-const hud = createHud(city);
-const save = loadSave();
-const game = createGame({ render, audio, hud, city, rng, save });
+audio.ensure();
 
-// For headless playtests: a JSON snapshot of the live state.
-window.__gameState = () => JSON.stringify({
-  time: Math.round(game.state.time * 10) / 10,
-  camYaw: Math.round(render.getCamYaw() * 100) / 100,
-  heading: Math.round(game.player.heading * 100) / 100,
-  wanted: game.state.wanted,
-  wantedReason: game.state.wantedReason,
-  health: Math.round(game.state.health),
-  cash: game.state.cash,
-  inCar: game.isDriving(),
-  speed: game.isDriving() ? Math.round(game.drivenCar().speed * 10) / 10 : 0,
-  missionsDone: game.state.missionsDone,
-  stage: game.missions.state.stage,
-  target: missionTarget(game.missions),
-  objective: missionObjective(game.missions),
-  pickups: game.state.stats.pickups,
-  gameOver: game.state.gameOver,
-  x: Math.round(game.player.x),
-  z: Math.round(game.player.z),
-  nearCar: Math.round(game.nearestCarDist() * 10) / 10,
-  nearestCar: game.nearestCarPos(),
-  nearestPed: game.nearestPedPos(),
-  pickupSpots: game.pickupPositions(),
-  policeCars: game.policeCarCount(),
-  nearestPolice: game.nearestPoliceDist(),
+const player = createPlayer(scene, city, CONFIG);
+const vehicles = createVehicles(scene, city, rng);
+const people = createPeople(scene, city, rng);
+const police = createPolice(scene, city, rng);
+const pickups = createPickups(scene, city, rng);
+
+const state = {
+  mode: 'title',
+  cash: 0,
+  health: 100,
+  wanted: 0,
+  wantedReason: '',
+  robbing: false,
+  cameraHeading: 0,
+  missionsDone: 0,
+  totalEarned: 0,
+  playerX: 0,
+  playerZ: 40,
+  speed: 0,
+  objective: '',
+  missionMarker: null,
+  police: police.cars,
+};
+
+const ctx = {
+  state,
+  config: CONFIG,
+  input,
+  audio,
+  renderer,
+  scene,
+  city,
+  player,
+  vehicles,
+  people,
+  police,
+  pickups,
+  rng,
+};
+
+const missions = createMissions(ctx);
+ctx.missions = missions;
+const hud = createHud();
+ctx.hud = hud;
+const game = createGame(ctx);
+ctx.game = game;
+
+hud.bind({
+  onStart: () => game.startNew(),
+  onContinue: () => game.continueGame(),
+  onResume: () => game.resumeGame(),
+  onRestart: () => game.restartAfterGameOver(),
 });
 
-const screens = {
-  title: document.getElementById('screen-title'),
-  pause: document.getElementById('screen-pause'),
-  over: document.getElementById('screen-over'),
-};
-const hudEl = document.getElementById('hud');
-const overTitle = document.getElementById('over-title');
-const overStats = document.getElementById('over-stats');
-
-function showScreen(name) {
-  for (const [key, el] of Object.entries(screens)) el.classList.toggle('hidden', key !== name);
-  hudEl.classList.toggle('hidden', name === 'title');
-}
-
-function announce(message) {
-  status.textContent = message;
-}
-
-// Input that never does anything (attract mode behind the title).
-function idleInput() {
-  return {
-    move: () => ({ x: 0, y: 0 }),
-    run: () => false,
-    brake: () => false,
-    takeActions: () => new Set(),
-    takeMouse: () => ({ dx: 0, dy: 0 }),
-    takeClick: () => false,
-    isDown: () => false,
-  };
-}
-
-function fillOverScreen() {
-  const s = game.state;
-  overTitle.textContent = s.gameOver === 'busted' ? 'BUSTED' : 'WASTED';
-  overStats.innerHTML =
-    `Cash <b>$${s.cash.toLocaleString('en-US')}</b> &nbsp;·&nbsp; Missions <b>${s.missionsDone}/4</b>` +
-    ` &nbsp;·&nbsp; Cars stolen <b>${s.stats.carsStolen}</b> &nbsp;·&nbsp; Shots fired <b>${s.stats.shotsFired}</b>`;
-}
-
 if (shot) {
-  // Screenshot mode: stage the scene, paint it twice, signal readiness.
-  const screen = stageShot(shot, game, render);
-  if (screen === 'title') {
-    showScreen('title');
-    render.camera.position.set(120, 70, 180);
-    render.camera.lookAt(0, 10, 0);
-  } else if (screen === 'over') {
-    fillOverScreen();
-    showScreen('over');
-    render.updateCamera(game.focus(), 'foot', 0.5);
-  } else {
-    showScreen(null);
-    render.updateCamera(game.focus(), game.isDriving() ? 'car' : 'foot', 0.5);
-  }
-  render.updateParticles(0.016);
-  render.render();
-  requestAnimationFrame(() => {
-    render.render();
-    window.__shotReady = true;
-  });
+  applyShot(ctx, shot);
 } else {
-  // The live game.
-  let screen = 'title';
-  let time = 0;
-  let accumulator = 0;
-  let last = performance.now();
-  let attractAngle = 0;
-
-  const btnStart = document.getElementById('btn-start');
-  const btnContinue = document.getElementById('btn-continue');
-  const btnResume = document.getElementById('btn-resume');
-  const btnRestart = document.getElementById('btn-restart');
-  const btnAgain = document.getElementById('btn-again');
-  const btnMute = document.getElementById('btn-mute');
-  const saveInfo = document.getElementById('save-info');
-
-  if (save && save.missionsDone > 0) {
-    saveInfo.textContent = `Welcome back — $${save.cash.toLocaleString('en-US')} in the bank, ${save.missionsDone}/4 missions done.`;
-    btnContinue.classList.remove('hidden');
-  }
-
-  function toggleMute() {
-    audio.setMuted(!audio.isMuted());
-    btnMute.textContent = audio.isMuted() ? 'Unmute (M)' : 'Mute (M)';
-  }
-
-  function startGame(fresh) {
-    audio.unlock();
-    if (fresh) {
-      game.reset();
-      game.state.cash = 0;
-      game.state.missionsDone = 0;
-      game.state.totalEarned = 0;
-      game.missions.state.index = 0;
-      game.missions.state.stage = 'steal';
-      game.missions.state.storyDone = false;
-      game.missions.state.done = false;
-    }
-    screen = 'play';
-    showScreen(null);
-    announce('Playing. Follow the objective on the right.');
-  }
-
-  btnStart.addEventListener('click', () => startGame(true));
-  btnContinue.addEventListener('click', () => startGame(false));
-  btnResume.addEventListener('click', () => {
-    screen = 'play';
-    showScreen(null);
-    announce('Playing.');
-  });
-  btnRestart.addEventListener('click', () => startGame(true));
-  btnAgain.addEventListener('click', () => startGame(true));
-  btnMute.addEventListener('click', toggleMute);
-
-  document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
-  document.addEventListener('keydown', () => audio.unlock(), { once: true });
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === 'play') {
-      screen = 'pause';
-      showScreen('pause');
-      announce('Paused.');
-    }
-  });
-
-  showScreen('title');
-  announce('Solmar City. Press Start to play.');
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    const actions = input.takeActions();
-    if (actions.has('KeyM')) toggleMute();
-    if (screen === 'play' && (actions.has('Escape') || actions.has('KeyP'))) {
-      screen = 'pause';
-      showScreen('pause');
-      announce('Paused.');
-    } else if (screen === 'pause' && (actions.has('Escape') || actions.has('KeyP') || actions.has('Enter'))) {
-      screen = 'play';
-      showScreen(null);
-      announce('Playing.');
-    } else if (screen === 'title' && actions.has('Enter')) {
-      startGame(true);
-    } else if (screen === 'over' && actions.has('Enter')) {
-      startGame(true);
-    }
-
-    if (screen === 'play' || screen === 'title') {
-      let firstStep = true;
-      while (accumulator >= STEP) {
-        time += STEP;
-        if (screen === 'play') {
-          // One-shot actions go to the first step only, or E would enter and exit in one frame.
-          const over = game.step(STEP, input, time, firstStep ? actions : NO_ACTIONS);
-          firstStep = false;
-          if (over) {
-            screen = 'over';
-            fillOverScreen();
-            showScreen('over');
-            announce(over === 'busted' ? 'Busted. Game over.' : 'Wasted. Game over.');
-            break;
-          }
-        } else {
-          // Attract mode: the city lives, the player waits.
-          game.step(STEP, idleInput(), time);
-        }
-        accumulator -= STEP;
-      }
-      if (screen === 'title') {
-        attractAngle += 0.02 * Math.min(0.05, 1 / 60);
-        const r = 190;
-        render.camera.position.set(Math.cos(attractAngle) * r, 64, Math.sin(attractAngle) * r);
-        render.camera.lookAt(0, 8, 0);
-      } else {
-        render.updateCamera(game.focus(), game.isDriving() ? 'car' : 'foot', 1 / 60);
-      }
-    } else {
-      accumulator = 0;
-    }
-    render.updateParticles(1 / 60);
-    render.render();
-  }
-  requestAnimationFrame(frame);
+  hud.showScreen('title');
 }
+
+window.addEventListener('beforeunload', () => {
+  if (state.mode === 'play' || state.mode === 'paused' || state.mode === 'gameover') {
+    writeSave({ cash: state.cash, missionsDone: state.missionsDone, totalEarned: state.totalEarned });
+  }
+});
+window.addEventListener('resize', () => {
+  renderer.resize(window.innerWidth, window.innerHeight);
+});
+
+// Debug state for playtesting (cash, health, wanted, missions done and the
+// nearest police distance, plus the driving and mission state).
+window.__gameState = {
+  cash: 0,
+  health: 100,
+  wanted: 0,
+  missionsDone: 0,
+  totalEarned: 0,
+  nearestPolice: null,
+  mode: 'title',
+  speed: 0,
+  playerX: 0,
+  playerZ: 40,
+  objective: '',
+  isDriving: false,
+  heading: 0,
+  mission: null,
+  missionStage: null,
+};
+// Playtest hooks: step the simulation without rendering, and drive the
+// input from a driver script.
+window.__game = {
+  state,
+  ctx,
+  input,
+  step: (dt) => game.tick(dt),
+  start: () => game.startNew(),
+};
+
+// Nearest police distance in metres, computed here from the police
+// module's public unit lists: the module's own nearestDistance() returns
+// NaN once foot cops exist, so this is the value __gameState reports.
+function nearestPoliceDistance() {
+  const px = state.playerX;
+  const pz = state.playerZ;
+  let best = null;
+  const consider = (u) => {
+    if (!u) return;
+    let x;
+    let z;
+    if (typeof u.x === 'number' && typeof u.z === 'number') {
+      x = u.x;
+      z = u.z;
+    } else if (u.mesh && u.mesh.position) {
+      x = u.mesh.position.x;
+      z = u.mesh.position.z;
+    } else if (u.pos && typeof u.pos.x === 'number') {
+      x = u.pos.x;
+      z = u.pos.z;
+    } else {
+      return;
+    }
+    const dx = x - px;
+    const dz = z - pz;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (Number.isFinite(d) && (best === null || d < best)) best = d;
+  };
+  for (const car of police.cars) consider(car);
+  for (const cop of police.cops) consider(cop);
+  return best;
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+  last = now;
+  game.tick(dt);
+  renderer.renderer.render(renderer.scene, renderer.camera);
+  const nearest = nearestPoliceDistance();
+  const current = missions.current();
+  window.__gameState.cash = state.cash;
+  window.__gameState.health = state.health;
+  window.__gameState.wanted = state.wanted;
+  window.__gameState.missionsDone = state.missionsDone;
+  window.__gameState.totalEarned = state.totalEarned;
+  window.__gameState.nearestPolice = typeof nearest === 'number' ? nearest : null;
+  window.__gameState.mode = state.mode;
+  window.__gameState.speed = state.speed;
+  window.__gameState.playerX = state.playerX;
+  window.__gameState.playerZ = state.playerZ;
+  window.__gameState.objective = state.objective;
+  window.__gameState.isDriving = vehicles.isDriving();
+  window.__gameState.heading =
+    vehicles.isDriving() && vehicles.playerCar ? vehicles.playerCar.heading : player.heading;
+  window.__gameState.mission = current ? current.id : null;
+  window.__gameState.missionStage = current ? missions.stage : null;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);

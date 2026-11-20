@@ -1,117 +1,74 @@
-// Solmar City tuning: every number the game balances on lives here, so a tweak never
-// means hunting through the simulation. The city is a sun-soaked coastal grid — roads
-// every PITCH metres, blocks full of buildings, a beach on the east edge. All names are
-// invented; nothing here points at a real place or a commercial game.
+// Solmar City — shared constants.
+// Every number the game tunes lives here so later phases read one place.
 
-export const STEP = 1 / 60; // fixed simulation step: sixty updates a second
+export const CONFIG = Object.freeze({
+  // World
+  worldSize: 500, // metres, square city from -250 to +250 on x and z
+  roadSpacing: 50, // metres between road centrelines
+  blockSize: 40, // metres of buildable block between roads
+  roadWidth: 10, // metres of asphalt per road
+  sidewalkWidth: 2, // metres of pavement each side of a road
 
-export const CITY = {
-  pitch: 56, // centre-to-centre distance between roads
-  roadHalf: 6, // roads are 12 m wide
-  grid: 4, // road lines at -4..4 times the pitch
-  bound: 252, // playable edge; the beach starts just past it
-  blockInset: 2, // how much sidewalk each block edge gives up
-};
+  // Player (on foot)
+  playerWalkSpeed: 6, // m/s
+  playerRunSpeed: 10, // m/s while Shift is held
+  playerRadius: 0.6, // metres, collision cylinder
+  playerHeight: 1.8, // metres
 
-export const PLAYER = {
-  walkSpeed: 6.5,
-  runSpeed: 10.5,
-  radius: 0.7,
-  health: 100,
-  punchRange: 2.4,
-  punchDamage: 34,
-  shootRange: 70,
-  shootDamage: 34,
-  shootCooldown: 0.22,
-  regenDelay: 8, // quiet seconds before health starts coming back
-  regenRate: 6, // health per second while regenerating
-};
+  // Camera (third person, behind the player)
+  cameraHeight: 4.5, // metres above the player
+  cameraDistance: 8, // metres behind the player
+  cameraSnapFirstFrame: true,
 
-export const CAR = {
-  accel: 16,
-  brake: 30,
-  reverseAccel: 10,
-  maxSpeed: 34, // m/s, about 122 km/h
-  maxReverse: 10,
-  steer: 1.9,
-  grip: 6,
-  radius: 2.1,
-  health: 100,
-};
+  // Wanted level and police
+  wantedMax: 5,
+  wantedDecayDistance: 30, // metres: no police within this for...
+  wantedDecayTime: 10, // ...seconds, then wanted drops by one
+  policeRamDamageCar: 5, // damage when the player is in a car
+  policeRamDamageFoot: 22, // damage when the player is on foot
+  policeRamCooldown: 2.5, // seconds per police car
+  policeTopSpeed: 14, // m/s
 
-export const TRAFFIC = { cars: 20, speedMin: 7, speedMax: 12 };
-export const PARKED = { count: 14 };
-export const PEDS = { count: 16, walkSpeed: 1.6, runSpeed: 4.5 };
+  // Car-to-car bump rule: speed cut only for NON-police cars
+  bumpDistance: 4.2, // metres
+  bumpSpeedCut: 0.3, // 30% cut while a non-police car is within range
 
-export const WANTED = {
-  max: 5,
-  stealCar: 1, // an occupied car; an empty parked car is free
-  hitPed: 1,
-  shoot: 1,
-  killCop: 2,
-  explodeCar: 1,
-  decayDelay: 10, // crime-free seconds before the level can fall
-  decayEvery: 6, // seconds per star lost while cooling down
-  bustedHold: 3, // seconds a cop must hold the player to bust them
-  policeCarPerStar: 1,
-  maxPoliceCars: 4,
-  footCopsAt: 2, // wanted level where foot cops join in
-  maxFootCops: 2,
-};
+  // Cash pickups
+  pickupCount: 12,
+  pickupValue: 25, // dollars each
+  pickupRespawn: 20, // seconds after collection
 
-export const MISSIONS = [
-  {
-    id: 'first-wheels',
-    title: 'First Wheels',
-    giver: 'Rico',
-    story: 'Rico needs a driver he can trust. Steal a car — any car — and bring it to the garage on Palm Row.',
-    objective: 'Steal a car and drive to the garage',
-    reward: 200,
-  },
-  {
-    id: 'the-package',
-    title: 'The Package',
-    giver: 'Rico',
-    story: 'A package is waiting at the docks. Pick it up and drop it at the motel before the heat catches up with you.',
-    objective: 'Pick up the package, then deliver it to the motel',
-    reward: 350,
-    timeLimit: 100,
-  },
-  {
-    id: 'heat',
-    title: 'Heat',
-    giver: 'Rico',
-    story: 'The cops are onto the crew. Get yourself a 3-star wanted level, then shake them and go quiet.',
-    objective: 'Reach 3 stars, then lose the cops',
-    reward: 500,
-  },
-  {
-    id: 'the-big-score',
-    title: 'The Big Score',
-    giver: 'Rico',
-    story: 'One last job: the Solmar National Bank. Grab the cash and get to the safehouse. This is the one they will remember.',
-    objective: 'Rob the bank, then escape to the safehouse',
-    reward: 1500,
-  },
-];
+  // Missions (rewards in dollars, story order)
+  missionRewards: [200, 350, 500, 1500],
+  packageTimeLimit: 100, // seconds for mission 2
 
-export const PALETTE = {
-  sky: 0x8ec9ee,
-  skyHorizon: 0xf6d9a0,
-  sun: 0xfff2c0,
-  fog: 0xd8e4ee,
-  asphalt: 0x3a3f46,
-  sidewalk: 0x9aa0a3,
-  sand: 0xe8d29a,
-  water: 0x2f7fb8,
-  grass: 0x6fae5e,
-  building: [0xf2e3c6, 0xe8b48a, 0xf6d9a0, 0xdfe8ee, 0xe8a08a, 0xcfe0d8, 0xf0c98a, 0xd8c2e0],
-  glass: 0x9fc8e8,
-  player: 0x2f6fb8,
-  police: 0x1c2733,
-};
+  // Save
+  saveKey: 'solmar-city-save-v1',
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  // Sky and light
+  hemisphereIntensity: 1.6, // strong fill so shadowed asphalt never reads as a void
+  sunIntensity: 2.2,
+  sunElevation: 38, // degrees above the horizon
+  sunAzimuth: 135, // degrees, afternoon sun from the south-east
+  fogNear: 180,
+  fogFar: 520,
 
-/** localStorage key for the save (this browser only). */
-export const SAVE_KEY = 'solmar-city.save.v1';
+  // City look
+  asphaltColor: 0x5c5c66, // dark grey, light enough to read as road in shadow
+  sidewalkColor: 0x9a9a94,
+  sandColor: 0xd9c28a,
+  waterColor: 0x2e7f9e,
+  grassColor: 0x5d8a4a,
+  facadeColors: [
+    0xe8dcc8, // warm cream
+    0xd9a066, // terracotta
+    0x8fb8c9, // pale blue
+    0xc96f6f, // dusty rose
+    0x9db98a, // sage green
+    0xe6c25a, // sunny yellow
+    0x7a9cc6, // sky blue
+    0xd98cb3, // pink
+    0xb8b0a0, // stone grey
+    0xf2ede4, // off white
+  ],
+});

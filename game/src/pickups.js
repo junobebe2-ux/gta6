@@ -1,70 +1,64 @@
-// Cash pickups — gold coins lying on the sidewalks, $25 a piece. They give the
-// player something to chase between Rico's jobs, and the HUD keeps score. A coin
-// that gets picked up pops back up somewhere new after a short while, so the
-// streets never run dry. Visuals and cash only; no network anywhere in here.
+// pickups.js — cash pickups scattered in the city, $25 each, 20 s respawn.
+// Phase B of the Solmar City fresh rebuild. Authored from the prose spec.
+// No repo source file was read while writing this module.
+
 import * as THREE from 'three';
+import { CONFIG } from './config.js';
 
-export const PICKUP_VALUE = 25;
-export const PICKUP_COUNT = 12;
-const RESPAWN_AFTER = 20;
-const COLLECT_RADIUS = 2.6;
-const COIN_HEIGHT = 1.1;
-const SPIN_RATE = 2.2;
-const BOB_DEPTH = 0.18;
-
-// A fresh spot on a sidewalk, shoved clear of any building it landed inside.
-function respot(coin, city) {
-  const spot = city.sidewalkPoint();
-  const clear = city.collideCircle(spot.x, spot.z, 1);
-  coin.x = clear.x;
-  coin.z = clear.z;
-  coin.group.position.set(coin.x, COIN_HEIGHT, coin.z);
-}
+const COLLECT_DIST = 2.5;
 
 export function createPickups(scene, city, rng) {
-  const coins = [];
-  const discGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 18);
-  discGeo.rotateX(Math.PI / 2); // turn the disc upright, like a wheel
-  const discMat = new THREE.MeshLambertMaterial({ color: 0xffc832, emissive: 0x8a6d00 });
-  const rimGeo = new THREE.TorusGeometry(0.34, 0.07, 8, 18);
-  const rimMat = new THREE.MeshLambertMaterial({ color: 0xffe9a8, emissive: 0x6a5200 });
-  for (let i = 0; i < PICKUP_COUNT; i += 1) {
-    const group = new THREE.Group();
-    const disc = new THREE.Mesh(discGeo, discMat);
-    disc.castShadow = true;
-    const rim = new THREE.Mesh(rimGeo, rimMat);
-    group.add(disc);
-    group.add(rim);
-    scene.add(group);
-    const coin = { group, x: 0, z: 0, phase: rng.range(0, Math.PI * 2), respawn: 0 };
-    respot(coin, city);
-    coins.push(coin);
+  const items = [];
+  const geo = new THREE.OctahedronGeometry(0.55);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffc21a, emissive: 0xaa7700, emissiveIntensity: 0.9 });
+  for (let i = 0; i < CONFIG.pickupCount; i++) {
+    // Near a road (clear of buildings): pick a grid road and an offset along it.
+    const axis = rng.pick(['x', 'z']);
+    const line = rng.pick([-200, -150, -100, -50, 0, 50, 100, 150, 200]);
+    const s = rng.range(-230, 230);
+    const off = rng.range(-3, 3);
+    let x, z;
+    if (axis === 'x') { x = s; z = line + off; }
+    else { x = line + off; z = s; }
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0.9, z);
+    mesh.castShadow = true;
+    scene.add(mesh);
+    items.push({ mesh, x, z, collected: false, respawnTimer: 0, phase: rng.range(0, Math.PI * 2) });
   }
-  return coins;
-}
 
-/**
- * Spin and bob the coins, and collect any the player walks or drives over.
- * ctx is {x, z, city, rng}; returns how many coins were collected this step.
- */
-export function stepPickups(pickups, ctx, dt, t) {
-  let taken = 0;
-  for (const coin of pickups) {
-    if (coin.respawn > 0) {
-      coin.respawn -= dt;
-      if (coin.respawn <= 0) {
-        respot(coin, ctx.city);
-        coin.group.visible = true;
+  const pk = {
+    items,
+
+    // Returns how many pickups were collected this frame.
+    step(dt, ctx) {
+      const { player, state } = ctx;
+      let collected = 0;
+      const t = performance.now() / 1000;
+      for (const it of items) {
+        if (it.collected) {
+          it.respawnTimer -= dt;
+          if (it.respawnTimer <= 0) {
+            it.collected = false;
+            it.mesh.visible = true;
+          }
+          continue;
+        }
+        it.mesh.rotation.y += dt * 2.2;
+        it.mesh.position.y = 0.9 + Math.sin(t * 2 + it.phase) * 0.15;
+        const dx = player.pos.x - it.x;
+        const dz = player.pos.z - it.z;
+        if (dx * dx + dz * dz < COLLECT_DIST * COLLECT_DIST) {
+          it.collected = true;
+          it.respawnTimer = CONFIG.pickupRespawn;
+          it.mesh.visible = false;
+          state.cash += CONFIG.pickupValue;
+          collected++;
+          if (ctx.audio) ctx.audio.pickup();
+        }
       }
-      continue;
-    }
-    coin.group.rotation.y += dt * SPIN_RATE;
-    coin.group.position.y = COIN_HEIGHT + Math.sin(t * 2 + coin.phase) * BOB_DEPTH;
-    if (Math.hypot(ctx.x - coin.x, ctx.z - coin.z) < COLLECT_RADIUS) {
-      taken += 1;
-      coin.respawn = RESPAWN_AFTER;
-      coin.group.visible = false;
-    }
-  }
-  return taken;
+      return collected;
+    },
+  };
+  return pk;
 }

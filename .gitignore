@@ -1,2 +1,5 @@
-# Build output from `node main.ts` (MAKEFUN_OUTPUT_DIR) — never committed.
+# Solmar City — ignored files
 out/
+node_modules/
+.DS_Store
+*.log

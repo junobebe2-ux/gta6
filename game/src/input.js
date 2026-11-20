@@ -1,94 +1,108 @@
-// Keyboard and mouse, read once a frame. WASD moves and drives, E enters/exits/steals
-// cars and interacts, F punches, Shift runs, Space is the handbrake, Esc/P pauses,
-// M mutes. The mouse orbits the camera while dragged and aims; a click shoots.
-export function createInput(canvas) {
-  const held = new Set(); // keys down right now
-  const pressed = new Set(); // keys pressed since the last takeActions()
+// Solmar City — keyboard + mouse state.
+// One input object per game: keys tracked by code, mouse drag turns the
+// camera, clicks are consumed exactly once. Losing focus clears all keys.
+
+export function createInput() {
+  const keys = new Set();
+  const clickQueue = [];
   let dragDX = 0;
-  let dragDY = 0;
   let dragging = false;
   let lastX = 0;
-  let lastY = 0;
-  let clicked = false;
+  let attached = false;
 
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) return;
-    held.add(event.code);
-    pressed.add(event.code);
-    if (event.code === 'Space') event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    held.delete(event.code);
-  });
-  window.addEventListener('blur', () => {
-    held.clear();
-  });
-
-  canvas.addEventListener('mousedown', (event) => {
-    dragging = true;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    clicked = true;
-    if (canvas.requestPointerLock) canvas.requestPointerLock();
-  });
-  window.addEventListener('mouseup', () => {
-    dragging = false;
-    if (document.pointerLockElement === canvas) document.exitPointerLock();
-  });
-  window.addEventListener('mousemove', (event) => {
-    if (document.pointerLockElement === canvas) {
-      dragDX += event.movementX;
-      dragDY += event.movementY;
-      return;
+  function onKeyDown(e) {
+    keys.add(e.code);
+    // Stop the page scrolling on game keys.
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      e.preventDefault();
     }
+  }
+
+  function onKeyUp(e) {
+    keys.delete(e.code);
+  }
+
+  function onBlur() {
+    keys.clear();
+    dragging = false;
+  }
+
+  function onMouseDown(e) {
+    clickQueue.push({ x: e.clientX, y: e.clientY, button: e.button });
+    dragging = true;
+    lastX = e.clientX;
+  }
+
+  function onMouseMove(e) {
     if (!dragging) return;
-    dragDX += event.clientX - lastX;
-    dragDY += event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
-  });
+    dragDX += e.clientX - lastX;
+    lastX = e.clientX;
+  }
 
-  const down = (code) => held.has(code);
+  function onMouseUp() {
+    dragging = false;
+  }
 
-  return {
-    /** WASD (or arrows) as -1..1 on each axis, camera-relative. */
-    move() {
+  const input = {
+    isDown(code) {
+      return keys.has(code);
+    },
+    // Movement axes from WASD / arrows: x is strafe-right (+1), y is
+    // forward (+1). Normalised so diagonals are not faster.
+    axis() {
       let x = 0;
       let y = 0;
-      if (down('KeyW') || down('ArrowUp')) y += 1;
-      if (down('KeyS') || down('ArrowDown')) y -= 1;
-      if (down('KeyA') || down('ArrowLeft')) x -= 1;
-      if (down('KeyD') || down('ArrowRight')) x += 1;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
+      const len = Math.hypot(x, y);
+      if (len > 1) {
+        x /= len;
+        y /= len;
+      }
       return { x, y };
     },
-    run() {
-      return down('ShiftLeft') || down('ShiftRight');
+    // The oldest unconsumed click, or null. Each click is returned once.
+    consumeClick() {
+      return clickQueue.length > 0 ? clickQueue.shift() : null;
     },
-    brake() {
-      return down('Space');
-    },
-    /** Whether a key is held down right now (for hold-to-interact). */
-    isDown(code) {
-      return down(code);
-    },
-    /** One-shot presses since the last take(): 'KeyE', 'KeyF', 'KeyP', 'Escape', 'KeyM', 'Enter', 'Space'. */
-    takeActions() {
-      const out = new Set(pressed);
-      pressed.clear();
-      return out;
-    },
-    /** Mouse orbit since the last take(), in pixels. */
-    takeMouse() {
-      const out = { dx: dragDX, dy: dragDY };
+    // Horizontal mouse drag since the last call, in pixels; resets to 0.
+    consumeDragDX() {
+      const d = dragDX;
       dragDX = 0;
-      dragDY = 0;
-      return out;
+      return d;
     },
-    /** Whether the canvas was clicked since the last take(). */
-    takeClick() {
-      const out = clicked;
-      clicked = false;
-      return out;
+    attach() {
+      if (attached || typeof window === 'undefined') return;
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+      window.addEventListener('blur', onBlur);
+      window.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+      attached = true;
+    },
+    detach() {
+      if (!attached || typeof window === 'undefined') return;
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      attached = false;
+    },
+    // Test hooks: feed a key or a click without a real event.
+    _press(code) {
+      keys.add(code);
+    },
+    _release(code) {
+      keys.delete(code);
+    },
+    _click(x, y) {
+      clickQueue.push({ x, y, button: 0 });
     },
   };
+  return input;
 }

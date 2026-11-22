@@ -1,204 +1,168 @@
-// Full HUD for Solmar City: wanted stars, cash, health, objective, speed,
-// the wanted banner pill repainted every frame, a 200x200 minimap canvas,
-// and the title / pause / game-over screens.
-import { CONFIG } from './config.js';
-import { loadSave } from './save.js';
+// HUD: wanted stars, cash, health, objective, speed, the persistent
+// wanted banner pill (repainted every frame from the live state), the
+// 200x200 minimap, and the title / pause / game-over screens.
+import { C } from './config.js';
+import { missionMarker } from './missions.js';
 
-export function createHud() {
-  const byId = (id) => document.getElementById(id);
-  const starsEl = byId('stars');
-  const cashEl = byId('cash');
-  const healthLabelEl = byId('health-label');
-  const healthFillEl = byId('health-fill');
-  const wantedEl = byId('wanted');
-  const speedEl = byId('speed');
-  const objectiveEl = byId('objective');
-  const hudEl = byId('hud');
-  const minimap = byId('minimap');
-  const titleScreen = byId('title-screen');
-  const pauseScreen = byId('pause-screen');
-  const gameoverScreen = byId('gameover-screen');
-  const gameoverTitle = byId('gameover-title');
-  const btnStart = byId('btn-start');
-  const btnContinue = byId('btn-continue');
-  const continueLabel = byId('continue-label');
-  const btnResume = byId('btn-resume');
-  const btnRestart = byId('btn-restart');
-  if (minimap) {
-    minimap.width = 200;
-    minimap.height = 200;
+export function createHud(S) {
+  S.hud = {
+    stars: document.getElementById('stars'),
+    cash: document.getElementById('cash'),
+    healthFill: document.getElementById('health-fill'),
+    healthText: document.getElementById('health-text'),
+    objective: document.getElementById('objective'),
+    speed: document.getElementById('speed'),
+    banner: document.getElementById('wanted-banner'),
+    minimap: document.getElementById('minimap'),
+    title: document.getElementById('title-screen'),
+    pause: document.getElementById('pause-screen'),
+    gameover: document.getElementById('gameover-screen'),
+    gameoverTitle: document.getElementById('gameover-title'),
+    gameoverStats: document.getElementById('gameover-stats'),
+    missionName: document.getElementById('mission-name'),
+  };
+  const ctx = S.hud.minimap.getContext('2d');
+  S.hud.minimapCtx = ctx;
+}
+
+function starsText(wanted) {
+  let s = '';
+  for (let i = 0; i < 5; i++) s += i < wanted ? '★' : '☆';
+  return s;
+}
+
+export function repaintHud(S) {
+  const h = S.hud;
+  const p = S.player;
+  const pol = S.police;
+  const m = S.missions;
+  h.stars.textContent = starsText(pol.wanted);
+  h.cash.textContent = '$' + p.cash;
+  const hp = Math.max(0, Math.round(p.health));
+  h.healthFill.style.width = hp + '%';
+  h.healthFill.style.background = hp > 50 ? '#3aa85a' : hp > 25 ? '#d8a83a' : '#c23a2a';
+  h.healthText.textContent = hp + ' HP';
+  h.objective.textContent = m.objective;
+  const mph = Math.round((p.onFoot ? p.speed : (p.car ? Math.abs(p.car.speed) : 0)) * 2.23694);
+  h.speed.textContent = mph + ' mph';
+  h.missionName.textContent = m.index < 4 ? `Mission ${m.index + 1}: ${['First Wheels', 'The Package', 'Heat', 'The Big Score'][m.index]}` : 'Free roam';
+  // The wanted banner always shows the current level and reason.
+  if (pol.wanted > 0) {
+    h.banner.style.display = 'block';
+    h.banner.textContent = `Wanted level ${pol.wanted} ${starsText(pol.wanted)} — ${m.stage === 'escape' ? 'Escape' : 'Chase'}${pol.reason ? ' · ' + pol.reason : ''}`;
+    h.banner.style.background = 'rgba(160,30,30,0.85)';
+  } else {
+    h.banner.style.display = 'block';
+    h.banner.textContent = 'Wanted level 0 ☆☆☆☆☆ — Clean';
+    h.banner.style.background = 'rgba(30,90,40,0.85)';
   }
-  const mctx = minimap ? minimap.getContext('2d') : null;
-  let actions = {};
-  let bound = false;
+}
 
-  function refreshContinue() {
-    let save = null;
-    try {
-      save = loadSave();
-    } catch (e) {
-      save = null;
-    }
-    if (save && btnContinue) {
-      btnContinue.style.display = '';
-      if (continueLabel) {
-        continueLabel.textContent =
-          'Continue — $' + (save.cash || 0) + ' · ' + (save.missionsDone || 0) + ' missions done';
-      }
-    } else if (btnContinue) {
-      btnContinue.style.display = 'none';
+export function drawMinimap(S) {
+  const ctx = S.hud.minimapCtx;
+  if (!ctx) return;
+  const W = 200;
+  const H = 200;
+  const scale = W / 500;
+  const toX = (x) => (x + 250) * scale;
+  const toY = (z) => (z + 250) * scale;
+  ctx.fillStyle = '#20242a';
+  ctx.fillRect(0, 0, W, H);
+  // Water + beach along the north edge.
+  ctx.fillStyle = '#2a7ab8';
+  ctx.fillRect(0, 0, W, 10);
+  ctx.fillStyle = '#e8d8a8';
+  ctx.fillRect(0, 10, W, 5);
+  // Roads.
+  ctx.strokeStyle = '#5a5a62';
+  ctx.lineWidth = 5;
+  for (let r = -250; r <= 250; r += 50) {
+    ctx.beginPath(); ctx.moveTo(toX(r), 0); ctx.lineTo(toX(r), H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, toY(r)); ctx.lineTo(W, toY(r)); ctx.stroke();
+  }
+  // Named places.
+  ctx.fillStyle = '#e8e0c8';
+  ctx.font = '7px sans-serif';
+  ctx.fillText("Rico's", toX(-175) - 10, toY(-75));
+  ctx.fillText('Bank', toX(75) - 8, toY(75));
+  ctx.fillText('Docks', toX(200) - 12, toY(-218));
+  ctx.fillText('Safehouse', toX(-200) - 16, toY(200));
+  // Cash pickups: gold dots.
+  for (const pk of S.pickups) {
+    if (pk.taken) continue;
+    ctx.fillStyle = '#ffd24a';
+    ctx.beginPath(); ctx.arc(toX(pk.x), toY(pk.z), 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+  // Mission marker: pulsing red diamond.
+  const marker = missionMarker(S);
+  if (marker) {
+    const pulse = 4 + Math.sin(S.time * 4) * 1.5;
+    ctx.fillStyle = '#ff3a3a';
+    ctx.beginPath();
+    ctx.moveTo(toX(marker.x), toY(marker.z) - pulse);
+    ctx.lineTo(toX(marker.x) + pulse, toY(marker.z));
+    ctx.lineTo(toX(marker.x), toY(marker.z) + pulse);
+    ctx.lineTo(toX(marker.x) - pulse, toY(marker.z));
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Traffic: yellow dots. Police: blue dots with a red ring.
+  for (const c of S.cars) {
+    if (c.kind === 'traffic') {
+      ctx.fillStyle = '#ffd24a';
+      ctx.beginPath(); ctx.arc(toX(c.x), toY(c.z), 2, 0, Math.PI * 2); ctx.fill();
+    } else if (c.kind === 'police') {
+      ctx.fillStyle = '#3a7aff';
+      ctx.beginPath(); ctx.arc(toX(c.x), toY(c.z), 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ff3a3a';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(toX(c.x), toY(c.z), 4.5, 0, Math.PI * 2); ctx.stroke();
     }
   }
-
-  function showScreen(name) {
-    if (titleScreen) titleScreen.style.display = name === 'title' ? '' : 'none';
-    if (pauseScreen) pauseScreen.style.display = name === 'pause' ? '' : 'none';
-    if (gameoverScreen) gameoverScreen.style.display = name === 'gameover' ? '' : 'none';
-    if (hudEl) hudEl.style.display = name === 'title' ? 'none' : '';
-    if (name === 'title') refreshContinue();
+  // Pedestrians: faint grey dots.
+  ctx.fillStyle = 'rgba(200,200,200,0.7)';
+  for (const ped of S.peds) {
+    ctx.beginPath(); ctx.arc(toX(ped.x), toY(ped.z), 1.2, 0, Math.PI * 2); ctx.fill();
   }
+  // Player: white triangle pointing along the facing.
+  const p = S.player;
+  const px = toX(p.x);
+  const py = toY(p.z);
+  const fx = Math.sin(p.angle);
+  const fz = -Math.cos(p.angle);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(px + fx * 6, py + fz * 6);
+  ctx.lineTo(px - fz * 4 - fx * 4, py + fx * 4 - fz * 4);
+  ctx.lineTo(px + fz * 4 - fx * 4, py - fx * 4 - fz * 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
 
-  function setGameOverTitle(kind) {
-    if (gameoverTitle) gameoverTitle.textContent = kind;
-  }
+export function showTitle(S, show) {
+  S.hud.title.style.display = show ? 'flex' : 'none';
+  document.getElementById('continue-btn').style.display = S.saveExists ? 'block' : 'none';
+}
 
-  function bind(next) {
-    actions = next || {};
-    if (bound) return;
-    bound = true;
-    if (btnStart) btnStart.addEventListener('click', () => actions.onStart && actions.onStart());
-    if (btnContinue) btnContinue.addEventListener('click', () => actions.onContinue && actions.onContinue());
-    if (btnResume) btnResume.addEventListener('click', () => actions.onResume && actions.onResume());
-    if (btnRestart) btnRestart.addEventListener('click', () => actions.onRestart && actions.onRestart());
-  }
+export function showPause(S, show) {
+  S.hud.pause.style.display = show ? 'flex' : 'none';
+}
 
-  function starsText(wanted) {
-    const max = CONFIG.wantedMax || 5;
-    let s = '';
-    for (let i = 0; i < max; i++) s += i < wanted ? '★' : '☆';
-    return s;
-  }
+export function showGameOver(S, kind) {
+  const h = S.hud;
+  h.gameoverTitle.textContent = kind;
+  h.gameoverTitle.style.color = kind === 'WASTED' ? '#ff5a4a' : '#ffb84a';
+  h.gameoverStats.textContent = `Cash $${S.player.cash} · Missions ${S.missions.missionsDone}/4 · Earned $${S.missions.totalEarned}`;
+  h.gameover.style.display = 'flex';
+  // The minimap keeps drawing under the overlay: repaint it once more
+  // right now so the game-over screen never shows a black minimap.
+  repaintHud(S);
+  drawMinimap(S);
+}
 
-  function repaint(state) {
-    const wanted = state.wanted || 0;
-    const stars = starsText(wanted);
-    if (starsEl) starsEl.textContent = stars;
-    if (cashEl) cashEl.textContent = '$' + (state.cash || 0).toLocaleString('en-US');
-    if (healthLabelEl) healthLabelEl.textContent = 'Health ' + Math.max(0, Math.round(state.health || 0));
-    if (healthFillEl) healthFillEl.style.width = Math.max(0, Math.min(100, state.health || 0)) + '%';
-    if (wantedEl) {
-      if (wanted > 0) {
-        wantedEl.textContent = 'Wanted level ' + wanted + ' ' + stars + ' — ' + (state.wantedReason || 'Lay low');
-        wantedEl.style.background = '#b91c1c';
-        wantedEl.style.color = '#fff';
-      } else {
-        wantedEl.textContent = 'No heat — stay clean';
-        wantedEl.style.background = '#14532d';
-        wantedEl.style.color = '#bbf7d0';
-      }
-    }
-    if (speedEl) speedEl.textContent = Math.round((state.speed || 0) * 2.237) + ' mph';
-    if (objectiveEl) objectiveEl.textContent = state.objective || '';
-  }
-
-  function unitPos(u) {
-    if (!u) return null;
-    if (typeof u.x === 'number' && typeof u.z === 'number') return { x: u.x, z: u.z };
-    if (u.mesh && u.mesh.position) return { x: u.mesh.position.x, z: u.mesh.position.z };
-    if (u.pos && typeof u.pos.x === 'number') return { x: u.pos.x, z: u.pos.z };
-    return null;
-  }
-
-  function drawMinimap(ctx) {
-    if (!mctx || !minimap) return;
-    const world = CONFIG.worldSize || 500;
-    const S = 200 / world;
-    const half = world / 2;
-    const toX = (x) => (x + half) * S;
-    const toY = (z) => (z + half) * S;
-    const state = ctx.state;
-    mctx.fillStyle = '#0b1520';
-    mctx.fillRect(0, 0, 200, 200);
-    const beach = ctx.city.places.beach;
-    mctx.fillStyle = '#1d4e89';
-    if (beach && beach.z > 0) mctx.fillRect(0, 200 - 14, 200, 14);
-    else if (beach) mctx.fillRect(0, 0, 200, 14);
-    const spacing = CONFIG.roadSpacing || 100;
-    mctx.strokeStyle = '#2c3e50';
-    mctx.lineWidth = 3;
-    for (let g = -half; g <= half + 1; g += spacing) {
-      mctx.beginPath();
-      mctx.moveTo(toX(g), 0);
-      mctx.lineTo(toX(g), 200);
-      mctx.stroke();
-      mctx.beginPath();
-      mctx.moveTo(0, toY(g));
-      mctx.lineTo(200, toY(g));
-      mctx.stroke();
-    }
-    for (const item of ctx.pickups.items) {
-      if (item.collected) continue;
-      mctx.fillStyle = '#f5c542';
-      mctx.beginPath();
-      mctx.arc(toX(item.x), toY(item.z), 2.5, 0, Math.PI * 2);
-      mctx.fill();
-    }
-    const playerCar = ctx.vehicles.playerCar;
-    for (const car of ctx.vehicles.cars) {
-      if (car === playerCar) continue;
-      mctx.fillStyle = '#9aa5b1';
-      mctx.fillRect(toX(car.x) - 2, toY(car.z) - 2, 4, 4);
-    }
-    mctx.fillStyle = '#ef4444';
-    for (const car of ctx.police.cars) {
-      const p = unitPos(car);
-      if (!p) continue;
-      mctx.fillRect(toX(p.x) - 2.5, toY(p.z) - 2.5, 5, 5);
-    }
-    for (const cop of ctx.police.cops) {
-      const p = unitPos(cop);
-      if (!p) continue;
-      mctx.beginPath();
-      mctx.arc(toX(p.x), toY(p.z), 2, 0, Math.PI * 2);
-      mctx.fill();
-    }
-    const marker = state.missionMarker;
-    if (marker) {
-      const pulse = 5 + 2 * Math.sin(performance.now() / 250);
-      const mx = toX(marker.x);
-      const my = toY(marker.z);
-      mctx.fillStyle = '#facc15';
-      mctx.beginPath();
-      mctx.moveTo(mx, my - pulse);
-      mctx.lineTo(mx + pulse, my);
-      mctx.lineTo(mx, my + pulse);
-      mctx.lineTo(mx - pulse, my);
-      mctx.closePath();
-      mctx.fill();
-    }
-    const heading =
-      ctx.vehicles.isDriving() && ctx.vehicles.playerCar ? ctx.vehicles.playerCar.heading : ctx.player.heading;
-    const px = toX(state.playerX || 0);
-    const py = toY(state.playerZ || 0);
-    const dx = Math.sin(heading);
-    const dz = Math.cos(heading);
-    const tipX = px + dx * 7;
-    const tipY = py + dz * 7;
-    const leftX = px - dz * 4 - dx * 4;
-    const leftY = py + dx * 4 - dz * 4;
-    const rightX = px + dz * 4 - dx * 4;
-    const rightY = py - dx * 4 - dz * 4;
-    mctx.fillStyle = '#ffffff';
-    mctx.beginPath();
-    mctx.moveTo(tipX, tipY);
-    mctx.lineTo(leftX, leftY);
-    mctx.lineTo(rightX, rightY);
-    mctx.closePath();
-    mctx.fill();
-    mctx.strokeStyle = '#0b1520';
-    mctx.lineWidth = 1;
-    mctx.stroke();
-  }
-
-  return { bind, showScreen, setGameOverTitle, refreshContinue, repaint, drawMinimap };
+export function hideGameOver(S) {
+  S.hud.gameover.style.display = 'none';
 }

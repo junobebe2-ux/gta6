@@ -1,5 +1,5 @@
-# Solmar City — ignored files
-out/
 node_modules/
+out/
+out-a/
+out-b/
 .DS_Store
-*.log
